@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lastmilebooks
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: NODE_ENV=production node dist/index.cjs
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: EMAIL_TO
+        value: thelastmilebooks@gmail.com
+      - key: EMAIL_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
