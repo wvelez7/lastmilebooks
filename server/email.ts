@@ -1,6 +1,9 @@
 import type { PickupRequest } from "@shared/schema";
 
-const NOTIFY_TO = process.env.NOTIFY_EMAIL || "thelastmilebooks@gmail.com";
+const NOTIFY_TO =
+  process.env.EMAIL_TO ||
+  process.env.NOTIFY_EMAIL ||
+  "thelastmilebooks@gmail.com";
 
 /**
  * Send an email notification when a new pickup request comes in.
@@ -92,7 +95,10 @@ async function sendWithResend(
   text: string,
   html: string
 ): Promise<{ ok: boolean; status: string }> {
-  const from = process.env.NOTIFY_FROM || "Last Mile Books <onboarding@resend.dev>";
+  const from =
+    process.env.EMAIL_FROM ||
+    process.env.NOTIFY_FROM ||
+    "Last Mile Books <onboarding@resend.dev>";
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -119,7 +125,10 @@ async function sendWithSendGrid(
   text: string,
   html: string
 ): Promise<{ ok: boolean; status: string }> {
-  const from = process.env.NOTIFY_FROM || "no-reply@lastmilebooks.com";
+  const from =
+    process.env.EMAIL_FROM ||
+    process.env.NOTIFY_FROM ||
+    "no-reply@lastmilebooks.com";
   try {
     const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
       method: "POST",
