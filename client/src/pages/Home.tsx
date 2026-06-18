@@ -358,7 +358,7 @@ export default function Home() {
               },
               {
                 q: "Do you provide written confirmation of the pickup?",
-                a: "Yes — we leave a written pickup confirmation with the date and an item count for your records. We are not a 501(c)(3) nonprofit, so this is a confirmation of pickup rather than a tax-deduction receipt. For deductible donations, we recommend giving directly to a registered charity such as your local library Friends group.",
+                a: "Yes — we leave a written pickup confirmation with the date and an item count for your records.",
               },
               {
                 q: "How quickly can you come out?",
