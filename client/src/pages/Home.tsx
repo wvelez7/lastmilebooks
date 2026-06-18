@@ -208,8 +208,8 @@ export default function Home() {
                   },
                   {
                     Icon: Recycle,
-                    title: "Zero landfill",
-                    body: "Books we can't pass along are recycled responsibly. Nothing thrown away.",
+                    title: "Hand-sorted with care",
+                    body: "Every donation is sorted by hand so each book has the best chance of finding a new reader.",
                   },
                   {
                     Icon: HeartHandshake,
@@ -248,8 +248,7 @@ export default function Home() {
           <div className="absolute inset-0 bg-foreground/30" />
           <div className="absolute inset-0 flex items-center justify-center px-6">
             <p className="max-w-2xl text-center font-serif text-2xl font-semibold leading-snug text-background md:text-3xl">
-              "Books don't belong in landfills. They belong with the next
-              reader."
+              "Every book deserves a next reader."
             </p>
           </div>
         </div>
@@ -288,7 +287,7 @@ export default function Home() {
                 About
               </p>
               <h2 className="mt-3 font-serif text-3xl font-semibold tracking-tight md:text-4xl">
-                Books don't belong in landfills.
+                Every book deserves a next reader.
               </h2>
               <div className="mt-8 aspect-[4/3] overflow-hidden rounded-2xl border border-border shadow-sm">
                 <img
@@ -319,8 +318,8 @@ export default function Home() {
                 />
                 <Stat
                   Icon={Sparkles}
-                  label="Books, not landfill"
-                  body="Every book given a second chance — recycled if we can't place it."
+                  label="Hand-sorted with care"
+                  body="Every book given a second chance with a new reader."
                 />
               </div>
             </div>
@@ -355,7 +354,7 @@ export default function Home() {
               },
               {
                 q: "What kinds of books do you take?",
-                a: "Just about everything: fiction, non-fiction, textbooks, cookbooks, children's books, hardcovers, paperbacks. Whatever we can't pass along is recycled responsibly.",
+                a: "Just about everything: fiction, non-fiction, textbooks, cookbooks, children's books, hardcovers, paperbacks. We accept books in just about any readable condition.",
               },
               {
                 q: "Can you provide a donation receipt?",
@@ -383,7 +382,7 @@ export default function Home() {
               },
               {
                 q: "What kinds of books do you NOT accept?",
-                a: "Almost nothing is off-limits. Fiction, non-fiction, textbooks, cookbooks, children's books, hardcovers, paperbacks, encyclopedias, reference books, religious books, art books — all welcome. The only books we cannot accept are those that are wet, moldy, or actively falling apart. Anything else we can't place with a new reader is recycled responsibly. Nothing goes to landfill.",
+                a: "Almost nothing is off-limits. Fiction, non-fiction, textbooks, cookbooks, children's books, hardcovers, paperbacks, encyclopedias, reference books, religious books, art books — all welcome. The only books we cannot accept are those that are wet, moldy, or actively falling apart.",
               },
             ].map((item) => (
               <details
