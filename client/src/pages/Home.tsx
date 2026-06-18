@@ -35,7 +35,7 @@ export default function Home() {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-primary">
                 <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                Murrieta · Menifee · Temecula
+                Murrieta · Menifee · Temecula · Palm Springs
               </div>
               <h1 className="mt-6 font-serif text-4xl font-semibold leading-[1.1] tracking-tight text-foreground sm:text-5xl md:text-6xl">
                 Give your books a&nbsp;second life.
@@ -199,7 +199,7 @@ export default function Home() {
                   {
                     Icon: Truck,
                     title: "Free pickup",
-                    body: "We come to you across Murrieta, Menifee, Temecula, and surrounding areas.",
+                    body: "We come to you across Murrieta, Menifee, Temecula, Palm Springs, and surrounding areas.",
                   },
                   {
                     Icon: BookOpen,
@@ -269,7 +269,7 @@ export default function Home() {
               Tell us where to come.
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-base text-muted-foreground">
-              Free pickup across Murrieta, Menifee, Temecula, and surrounding
+              Free pickup across Murrieta, Menifee, Temecula, Palm Springs, and surrounding
               areas. One-box minimum. We respond within one business day.
             </p>
           </div>
@@ -351,7 +351,7 @@ export default function Home() {
               },
               {
                 q: "Where do you pick up?",
-                a: "We currently service Murrieta, Menifee, Temecula, and surrounding areas in Riverside County. If you're slightly outside that radius, contact us — we'll often still come.",
+                a: "We currently service Murrieta, Menifee, Temecula, Palm Springs, and surrounding areas in Riverside County. If you're slightly outside that radius, contact us — we'll often still come.",
               },
               {
                 q: "What kinds of books do you take?",
@@ -364,6 +364,26 @@ export default function Home() {
               {
                 q: "How quickly can you come out?",
                 a: "Same-week pickups are usually available. We confirm your preferred date within one business day of your request.",
+              },
+              {
+                q: "Do you really pick up books for free in Murrieta?",
+                a: "Yes — pickups are completely free across Murrieta and surrounding areas. We just ask for a one-box minimum so the trip makes sense. There is no maximum and no hidden fee.",
+              },
+              {
+                q: "Can you handle an estate library with 1,000+ books in Temecula?",
+                a: "Absolutely. Estate libraries are our specialty in Temecula and the surrounding Riverside County area. We have handled jobs from a single box up to thousands of books. We do a walkthrough, sort everything by hand, and leave you with a written receipt for the full count.",
+              },
+              {
+                q: "How fast can you come out to Menifee for a pickup?",
+                a: "Same-week pickups in Menifee are usually available. After you submit a request, we confirm your preferred date within one business day.",
+              },
+              {
+                q: "Do you pick up books in Palm Springs?",
+                a: "Yes. We service Palm Springs and the surrounding Coachella Valley for book donation pickups. Because it is a longer drive from our base in Temecula, Palm Springs pickups are typically scheduled for a specific weekly route — submit a request and we will give you the next available window.",
+              },
+              {
+                q: "What kinds of books do you NOT accept?",
+                a: "Almost nothing is off-limits. Fiction, non-fiction, textbooks, cookbooks, children's books, hardcovers, paperbacks, encyclopedias, reference books, religious books, art books — all welcome. The only books we cannot accept are those that are wet, moldy, or actively falling apart. Anything else we can't place with a new reader is recycled responsibly. Nothing goes to landfill.",
               },
             ].map((item) => (
               <details
