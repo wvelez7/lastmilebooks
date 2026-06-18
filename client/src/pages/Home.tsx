@@ -118,7 +118,7 @@ export default function Home() {
               {
                 n: "03",
                 title: "We do the pickup",
-                body: "We arrive on the agreed day with our own boxes and vehicle. Books are loaded and you get a receipt for your records.",
+                body: "We arrive on the agreed day with our own boxes and vehicle. Books are loaded and you get a written pickup confirmation for your records.",
               },
               {
                 n: "04",
@@ -357,8 +357,8 @@ export default function Home() {
                 a: "Just about everything: fiction, non-fiction, textbooks, cookbooks, children's books, hardcovers, paperbacks. We accept books in just about any readable condition.",
               },
               {
-                q: "Can you provide a donation receipt?",
-                a: "Yes — when we pick up, we leave a written receipt with the date and an item count for your records.",
+                q: "Do you provide written confirmation of the pickup?",
+                a: "Yes — we leave a written pickup confirmation with the date and an item count for your records. We are not a 501(c)(3) nonprofit, so this is a confirmation of pickup rather than a tax-deduction receipt. For deductible donations, we recommend giving directly to a registered charity such as your local library Friends group.",
               },
               {
                 q: "How quickly can you come out?",
@@ -370,7 +370,7 @@ export default function Home() {
               },
               {
                 q: "Can you handle an estate library with 1,000+ books in Temecula?",
-                a: "Absolutely. Estate libraries are our specialty in Temecula and the surrounding Riverside County area. We have handled jobs from a single box up to thousands of books. We do a walkthrough, sort everything by hand, and leave you with a written receipt for the full count.",
+                a: "Absolutely. Estate libraries are our specialty in Temecula and the surrounding Riverside County area. We have handled jobs from a single box up to thousands of books. We do a walkthrough, sort everything by hand, and leave you with a written pickup confirmation showing the full count.",
               },
               {
                 q: "How fast can you come out to Menifee for a pickup?",
