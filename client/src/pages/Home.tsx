@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { PickupForm } from "@/components/PickupForm";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -23,6 +24,24 @@ function scrollTo(id: string) {
 }
 
 export default function Home() {
+  useEffect(() => {
+    // Support deep-links from static landing pages: /?scrollTo=schedule
+    const params = new URLSearchParams(window.location.search);
+    const target = params.get("scrollTo");
+    if (target) {
+      // Wait for the section to mount, then scroll
+      const tryScroll = (attempt = 0) => {
+        const el = document.getElementById(target);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else if (attempt < 20) {
+          setTimeout(() => tryScroll(attempt + 1), 100);
+        }
+      };
+      tryScroll();
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <SiteHeader />
