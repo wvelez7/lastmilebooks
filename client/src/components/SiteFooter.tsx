@@ -14,11 +14,11 @@ export function SiteFooter() {
             </p>
             <p className="text-sm text-muted-foreground">
               <a
-                href="mailto:hello@lastmilebooks.com"
+                href="mailto:haylee@lastmilebooks.com"
                 className="hover:text-foreground"
                 data-testid="link-email"
               >
-                hello@lastmilebooks.com
+                haylee@lastmilebooks.com
               </a>
               {" · "}
               <a href="tel:+19512493215" className="hover:text-foreground">
