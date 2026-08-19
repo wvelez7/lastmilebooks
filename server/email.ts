@@ -176,7 +176,7 @@ function renderCustomerHtml(r: PickupRequest): string {
           <div style="font-weight:bold;margin-bottom:6px;">On the day of pickup</div>
           <div>Please leave your books on the porch or at the top of your driveway. We'll send a confirmation email that day with your pickup window.</div>
         </div>
-        <p style="margin:0 0 14px 0;">Questions? Just reply to this email or call <a href="tel:+19512493215" style="color:#2E5D3A;">(951) 249-3215</a>.</p>
+        <p style="margin:0 0 14px 0;">Questions? Just reply to this email.</p>
         <p style="margin:0;">Thanks,<br/>Last Mile Books</p>
       </div>
       <div style="padding:12px 24px;background:#FBF8F0;color:#5C6359;font-size:12px;border-top:1px solid #DCD5C2;">
