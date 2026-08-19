@@ -20,10 +20,6 @@ export function SiteFooter() {
               >
                 haylee@lastmilebooks.com
               </a>
-              {" · "}
-              <a href="tel:+19512493215" className="hover:text-foreground">
-                (951) 249-3215
-              </a>
             </p>
           </div>
 
