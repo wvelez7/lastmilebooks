@@ -32,6 +32,13 @@ export function SiteHeader() {
           >
             About
           </button>
+          <a
+            href="/partners.html"
+            className="text-sm font-medium text-muted-foreground hover:text-foreground"
+            data-testid="link-partners-header"
+          >
+            Partners
+          </a>
           <button
             onClick={() => scrollTo("faq")}
             className="text-sm font-medium text-muted-foreground hover:text-foreground"
@@ -53,3 +60,4 @@ export function SiteHeader() {
     </header>
   );
 }
+
