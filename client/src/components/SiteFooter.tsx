@@ -83,6 +83,15 @@ export function SiteFooter() {
               </li>
               <li>
                 <a
+                  href="/partners.html"
+                  className="hover:text-foreground"
+                  data-testid="link-partners"
+                >
+                  Partners program (50/50 split)
+                </a>
+              </li>
+              <li>
+                <a
                   href="/#schedule"
                   className="hover:text-foreground"
                   data-testid="link-schedule"
@@ -111,3 +120,4 @@ export function SiteFooter() {
     </footer>
   );
 }
+
