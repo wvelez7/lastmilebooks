@@ -14,6 +14,11 @@ const FROM =
   process.env.NOTIFY_FROM ||
   "Last Mile Books <pickups@lastmilebooks.com>";
 
+// The FROM address is send-only (Resend/SendGrid have no inbox behind it), so
+// replies to it bounce. Point customer replies at a real, monitored inbox.
+const REPLY_TO =
+  process.env.EMAIL_REPLY_TO || "Last Mile Books <thelastmilebooks@gmail.com>";
+
 /**
  * Send email notifications when a new pickup request comes in.
  *
@@ -44,7 +49,8 @@ export async function sendPickupRequestEmail(
       NOTIFY_TO_LIST,
       ownerSubject,
       ownerText,
-      ownerHtml
+      ownerHtml,
+      req.email || REPLY_TO
     );
     // Send customer confirmation (best-effort; owner notification is primary)
     if (req.email) {
@@ -52,7 +58,8 @@ export async function sendPickupRequestEmail(
         [req.email],
         customerSubject,
         customerText,
-        customerHtml
+        customerHtml,
+        REPLY_TO
       ).catch((e) =>
         console.error("[email] Customer confirmation exception:", e)
       );
@@ -64,14 +71,16 @@ export async function sendPickupRequestEmail(
       NOTIFY_TO_LIST,
       ownerSubject,
       ownerText,
-      ownerHtml
+      ownerHtml,
+      req.email || REPLY_TO
     );
     if (req.email) {
       await sendWithSendGrid(
         [req.email],
         customerSubject,
         customerText,
-        customerHtml
+        customerHtml,
+        REPLY_TO
       ).catch((e) =>
         console.error("[email] Customer confirmation exception:", e)
       );
@@ -186,6 +195,13 @@ function renderCustomerHtml(r: PickupRequest): string {
   </div>`;
 }
 
+// "Name <addr@x.com>" -> { email, name }; SendGrid rejects the combined form.
+function parseAddress(addr: string): { email: string; name?: string } {
+  const m = addr.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  if (!m) return { email: addr.trim() };
+  return m[1] ? { email: m[2].trim(), name: m[1] } : { email: m[2].trim() };
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -199,7 +215,8 @@ async function sendWithResend(
   toList: string[],
   subject: string,
   text: string,
-  html: string
+  html: string,
+  replyTo: string
 ): Promise<{ ok: boolean; status: string }> {
   try {
     const res = await fetch("https://api.resend.com/emails", {
@@ -208,7 +225,14 @@ async function sendWithResend(
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ from: FROM, to: toList, subject, text, html }),
+      body: JSON.stringify({
+        from: FROM,
+        to: toList,
+        reply_to: replyTo,
+        subject,
+        text,
+        html,
+      }),
     });
     if (!res.ok) {
       const body = await res.text();
@@ -226,7 +250,8 @@ async function sendWithSendGrid(
   toList: string[],
   subject: string,
   text: string,
-  html: string
+  html: string,
+  replyTo: string
 ): Promise<{ ok: boolean; status: string }> {
   try {
     const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
@@ -237,7 +262,8 @@ async function sendWithSendGrid(
       },
       body: JSON.stringify({
         personalizations: [{ to: toList.map((email) => ({ email })) }],
-        from: { email: FROM, name: "Last Mile Books" },
+        from: parseAddress(FROM),
+        reply_to: parseAddress(replyTo),
         subject,
         content: [
           { type: "text/plain", value: text },

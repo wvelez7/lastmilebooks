@@ -39,6 +39,7 @@ Set these in your hosting provider (Render, Railway, Fly, etc.):
 | `RESEND_API_KEY` | Recommended | Your [Resend](https://resend.com) API key. Without it, pickup requests are still saved to the database but no email is sent. |
 | `EMAIL_TO` | Recommended | Inbox to receive new pickup requests. Defaults to `thelastmilebooks@gmail.com`. |
 | `EMAIL_FROM` | Recommended | Verified sender address (e.g. `pickups@lastmilebooks.com`). Must be on a domain verified in Resend. |
+| `EMAIL_REPLY_TO` | Optional | Where customer replies go. `EMAIL_FROM` is send-only, so replies to it would bounce. Defaults to `thelastmilebooks@gmail.com`. |
 | `PORT` | Optional | Server port. Defaults to `5000`. Render sets this automatically. |
 | `NODE_ENV` | Required in prod | Set to `production`. |
 
