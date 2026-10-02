@@ -10,7 +10,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: EMAIL_TO
-        value: thelastmilebooks@gmail.com
+        value: thelastmilebooks@gmail.com,haylee@lastmilebooks.com
+      - key: EMAIL_REPLY_TO
+        value: thelastmilebooks@gmail.com,haylee@lastmilebooks.com
       - key: EMAIL_FROM
         sync: false
       - key: RESEND_API_KEY

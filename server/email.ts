@@ -16,8 +16,13 @@ const FROM =
 
 // The FROM address is send-only (Resend/SendGrid have no inbox behind it), so
 // replies to it bounce. Point customer replies at a real, monitored inbox.
-const REPLY_TO =
-  process.env.EMAIL_REPLY_TO || "Last Mile Books <thelastmilebooks@gmail.com>";
+const REPLY_TO = (
+  process.env.EMAIL_REPLY_TO ||
+  "thelastmilebooks@gmail.com,haylee@lastmilebooks.com"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 /**
  * Send email notifications when a new pickup request comes in.
@@ -50,7 +55,7 @@ export async function sendPickupRequestEmail(
       ownerSubject,
       ownerText,
       ownerHtml,
-      req.email || REPLY_TO
+      req.email ? [req.email] : REPLY_TO
     );
     // Send customer confirmation (best-effort; owner notification is primary)
     if (req.email) {
@@ -72,7 +77,7 @@ export async function sendPickupRequestEmail(
       ownerSubject,
       ownerText,
       ownerHtml,
-      req.email || REPLY_TO
+      req.email ? [req.email] : REPLY_TO
     );
     if (req.email) {
       await sendWithSendGrid(
@@ -216,7 +221,7 @@ async function sendWithResend(
   subject: string,
   text: string,
   html: string,
-  replyTo: string
+  replyTo: string[]
 ): Promise<{ ok: boolean; status: string }> {
   try {
     const res = await fetch("https://api.resend.com/emails", {
@@ -251,7 +256,7 @@ async function sendWithSendGrid(
   subject: string,
   text: string,
   html: string,
-  replyTo: string
+  replyTo: string[]
 ): Promise<{ ok: boolean; status: string }> {
   try {
     const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
@@ -263,7 +268,7 @@ async function sendWithSendGrid(
       body: JSON.stringify({
         personalizations: [{ to: toList.map((email) => ({ email })) }],
         from: parseAddress(FROM),
-        reply_to: parseAddress(replyTo),
+        reply_to_list: replyTo.map(parseAddress),
         subject,
         content: [
           { type: "text/plain", value: text },
