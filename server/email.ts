@@ -1,13 +1,26 @@
 import type { PickupRequest } from "@shared/schema";
 
-const NOTIFY_TO_LIST = (
-  process.env.EMAIL_TO ||
-  process.env.NOTIFY_EMAIL ||
-  "haylee@lastmilebooks.com,thelastmilebooks@gmail.com"
-)
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+// Both inboxes always receive pickup requests and customer replies. EMAIL_TO /
+// EMAIL_REPLY_TO (comma-separated) can add more addresses but never drop these.
+const TEAM_INBOXES = ["thelastmilebooks@gmail.com", "haylee@lastmilebooks.com"];
+
+function addressList(...sources: (string | undefined)[]): string[] {
+  const all = [...TEAM_INBOXES, ...sources.flatMap((v) => (v || "").split(","))]
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  return all.filter((a) => {
+    const key = (a.match(/<([^>]+)>/)?.[1] || a).toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+const NOTIFY_TO_LIST = addressList(
+  process.env.EMAIL_TO,
+  process.env.NOTIFY_EMAIL
+);
 
 const FROM =
   process.env.EMAIL_FROM ||
@@ -15,14 +28,8 @@ const FROM =
   "Last Mile Books <pickups@lastmilebooks.com>";
 
 // The FROM address is send-only (Resend/SendGrid have no inbox behind it), so
-// replies to it bounce. Point customer replies at a real, monitored inbox.
-const REPLY_TO = (
-  process.env.EMAIL_REPLY_TO ||
-  "thelastmilebooks@gmail.com,haylee@lastmilebooks.com"
-)
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+// replies to it bounce. Point customer replies at the real, monitored inboxes.
+const REPLY_TO = addressList(process.env.EMAIL_REPLY_TO);
 
 /**
  * Send email notifications when a new pickup request comes in.

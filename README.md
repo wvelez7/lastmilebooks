@@ -37,9 +37,9 @@ Set these in your hosting provider (Render, Railway, Fly, etc.):
 | Variable | Required | Description |
 | --- | --- | --- |
 | `RESEND_API_KEY` | Recommended | Your [Resend](https://resend.com) API key. Without it, pickup requests are still saved to the database but no email is sent. |
-| `EMAIL_TO` | Recommended | Comma-separated inboxes to receive new pickup requests. Defaults to `haylee@lastmilebooks.com,thelastmilebooks@gmail.com`. |
+| `EMAIL_TO` | Recommended | Extra comma-separated inboxes for new pickup requests. `thelastmilebooks@gmail.com` and `haylee@lastmilebooks.com` always receive them. |
 | `EMAIL_FROM` | Recommended | Verified sender address (e.g. `pickups@lastmilebooks.com`). Must be on a domain verified in Resend. |
-| `EMAIL_REPLY_TO` | Optional | Comma-separated inboxes that customer replies go to. `EMAIL_FROM` is send-only, so replies to it would bounce. Defaults to `thelastmilebooks@gmail.com,haylee@lastmilebooks.com`. |
+| `EMAIL_REPLY_TO` | Optional | Extra comma-separated inboxes for customer replies (`EMAIL_FROM` is send-only, so replies to it would bounce). `thelastmilebooks@gmail.com` and `haylee@lastmilebooks.com` always receive them. |
 | `PORT` | Optional | Server port. Defaults to `5000`. Render sets this automatically. |
 | `NODE_ENV` | Required in prod | Set to `production`. |
 
