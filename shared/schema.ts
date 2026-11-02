@@ -18,6 +18,15 @@ export const pickupRequests = sqliteTable("pickup_requests", {
   emailStatus: text("email_status").notNull().default("pending"),
 });
 
+// Pickups run on Tuesdays (2) and Wednesdays (3) only.
+export const PICKUP_WEEKDAYS = [2, 3];
+
+export function isPickupDay(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const day = new Date(`${value}T00:00:00Z`).getUTCDay();
+  return PICKUP_WEEKDAYS.includes(day);
+}
+
 export const insertPickupRequestSchema = createInsertSchema(pickupRequests, {
   fullName: (s) => s.min(2, "Please enter your full name"),
   email: (s) => s.email("Please enter a valid email"),
@@ -25,7 +34,10 @@ export const insertPickupRequestSchema = createInsertSchema(pickupRequests, {
   pickupAddress: (s) => s.min(5, "Please enter a street address"),
   city: (s) => s.min(2, "Please enter a city"),
   numberOfBoxes: (s) => s.min(1, "How many boxes?"),
-  preferredDate: (s) => s.min(1, "Pick a preferred date"),
+  preferredDate: (s) =>
+    s
+      .min(1, "Pick a preferred date")
+      .refine(isPickupDay, "Pickups are only available on Tuesdays and Wednesdays"),
 }).omit({ id: true, createdAt: true, emailStatus: true });
 
 export type InsertPickupRequest = z.infer<typeof insertPickupRequestSchema>;

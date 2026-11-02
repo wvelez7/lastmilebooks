@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import {
   insertPickupRequestSchema,
+  PICKUP_WEEKDAYS,
   type InsertPickupRequest,
 } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
@@ -35,8 +36,33 @@ const BOX_OPTIONS = [
   "21+ boxes",
 ];
 
+const WEEKS_AHEAD = 8;
+
+// Upcoming Tuesdays and Wednesdays, starting tomorrow.
+function upcomingPickupDates() {
+  const dates: { value: string; label: string }[] = [];
+  const d = new Date();
+  for (let i = 1; i <= WEEKS_AHEAD * 7; i++) {
+    d.setDate(d.getDate() + 1);
+    if (!PICKUP_WEEKDAYS.includes(d.getDay())) continue;
+    const value = [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, "0"),
+      String(d.getDate()).padStart(2, "0"),
+    ].join("-");
+    const label = d.toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
+    dates.push({ value, label });
+  }
+  return dates;
+}
+
 export function PickupForm() {
   const [submitted, setSubmitted] = useState(false);
+  const [pickupDates] = useState(upcomingPickupDates);
 
   const form = useForm<InsertPickupRequest>({
     resolver: zodResolver(insertPickupRequestSchema),
@@ -227,13 +253,26 @@ export function PickupForm() {
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Preferred pickup date</FormLabel>
-                <FormControl>
-                  <Input
-                    type="date"
-                    {...field}
-                    data-testid="input-preferred-date"
-                  />
-                </FormControl>
+                <Select
+                  value={field.value || undefined}
+                  onValueChange={field.onChange}
+                >
+                  <FormControl>
+                    <SelectTrigger data-testid="input-preferred-date">
+                      <SelectValue placeholder="Pick a Tuesday or Wednesday" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {pickupDates.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Pickups run Tuesdays and Wednesdays.
+                </p>
                 <FormMessage />
               </FormItem>
             )}
