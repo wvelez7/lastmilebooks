@@ -64,6 +64,21 @@ export function SiteFooter() {
                   Palm Springs book donation pickup
                 </a>
               </li>
+              {[
+                ["lake-elsinore", "Lake Elsinore"],
+                ["wildomar", "Wildomar"],
+                ["french-valley-winchester", "French Valley & Winchester"],
+              ].map(([slug, name]) => (
+                <li key={slug}>
+                  <a
+                    href={`/book-donation-pickup-${slug}.html`}
+                    className="hover:text-foreground"
+                    data-testid={`link-${slug}`}
+                  >
+                    {name} book donation pickup
+                  </a>
+                </li>
+              ))}
             </ul>
           </div>
 
