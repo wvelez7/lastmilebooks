@@ -401,7 +401,7 @@ export default function Home() {
               },
               {
                 q: "What kinds of books do you NOT accept?",
-                a: "Almost nothing is off-limits. Fiction, non-fiction, textbooks, cookbooks, children's books, hardcovers, paperbacks, encyclopedias, reference books, religious books, art books — all welcome. The only books we cannot accept are those that are wet, moldy, or actively falling apart.",
+                a: "Almost nothing is off-limits. Fiction, non-fiction, textbooks, cookbooks, children's books, hardcovers, paperbacks, reference books, religious books, art books — all welcome. The only books we cannot accept are encyclopedia sets and books that are wet, moldy, or actively falling apart.",
               },
             ].map((item) => (
               <details
