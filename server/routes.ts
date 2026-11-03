@@ -4,6 +4,8 @@ import type { Server } from "node:http";
 import { storage } from "./storage";
 import { insertPickupRequestSchema } from "@shared/schema";
 import { sendPickupRequestEmail } from "./email";
+import { registerInventoryRoutes } from "./inventory/routes";
+import { startInventorySync } from "./inventory/sync";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -47,6 +49,10 @@ export async function registerRoutes(
     const all = await storage.listPickupRequests();
     return res.json(all);
   });
+
+  // Cross-marketplace inventory sync (admin page at /#/inventory)
+  registerInventoryRoutes(app);
+  startInventorySync();
 
   return httpServer;
 }

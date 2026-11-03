@@ -4,7 +4,9 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { desc, eq } from "drizzle-orm";
 
-const sqlite = new Database("data.db");
+// On Render, point DATABASE_PATH at the persistent disk (see render.yaml);
+// the default local file is wiped on every deploy there.
+const sqlite = new Database(process.env.DATABASE_PATH || "data.db");
 sqlite.pragma("journal_mode = WAL");
 
 // Bootstrap table if it doesn't exist (so we don't require running drizzle-kit push)
@@ -21,6 +23,36 @@ sqlite.exec(`
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     email_status TEXT NOT NULL DEFAULT 'pending'
+  );
+
+  CREATE TABLE IF NOT EXISTS inventory_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sku TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    whatnot_variant_id TEXT,
+    ebay_item_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS processed_sales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS sync_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    level TEXT NOT NULL,
+    message TEXT NOT NULL,
+    sku TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS sync_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
   );
 `);
 

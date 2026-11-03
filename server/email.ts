@@ -207,6 +207,25 @@ function renderCustomerHtml(r: PickupRequest): string {
   </div>`;
 }
 
+/**
+ * Internal alert to the team inboxes (e.g. an inventory sync that failed and
+ * needs a listing pulled by hand). Plain text only.
+ */
+export async function sendTeamAlert(
+  subject: string,
+  text: string
+): Promise<{ ok: boolean; status: string }> {
+  const html = `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>`;
+  if (process.env.RESEND_API_KEY) {
+    return sendWithResend(NOTIFY_TO_LIST, subject, text, html, REPLY_TO);
+  }
+  if (process.env.SENDGRID_API_KEY) {
+    return sendWithSendGrid(NOTIFY_TO_LIST, subject, text, html, REPLY_TO);
+  }
+  console.log(`[email] No mail provider configured. Alert: ${subject}\n${text}`);
+  return { ok: false, status: "no_provider_configured" };
+}
+
 // "Name <addr@x.com>" -> { email, name }; SendGrid rejects the combined form.
 function parseAddress(addr: string): { email: string; name?: string } {
   const m = addr.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);

@@ -61,6 +61,32 @@ A `render.yaml` is included for one-click "Blueprint" deploys.
 - `POST /api/pickup-requests` — public, accepts a JSON pickup request, validates with Zod, persists to SQLite, and sends an email.
 - `GET /api/pickup-requests` — admin endpoint listing all requests (no auth — protect or remove before exposing publicly).
 
+## Inventory sync (Whatnot + eBay)
+
+When a book sells on one marketplace, its quantity drops here and the new
+quantity is pushed to the other marketplace (at 0 the listing comes down).
+Code lives in `server/inventory/`; the admin page is `/#/inventory` (enter `ADMIN_KEY`).
+
+- Books are matched by **SKU**: use the same SKU on the Whatnot listing and as the eBay "Custom label", then click **Import & match by SKU**. Books without a SKU (e.g. $1 live-show stock) are ignored.
+- Orders on both marketplaces are checked every `INVENTORY_POLL_SECONDS` (default 60). The first check starts from "now", so older orders are never replayed. Optional Whatnot webhooks (`POST /api/webhooks/whatnot`) make Whatnot sales near-instant.
+- A failed update is logged on the admin page, retried every poll, and emailed to the team inboxes once.
+- Cancelled orders are **not** relisted automatically; relist by hand.
+
+Setup:
+
+1. **Render disk**: `render.yaml` mounts a 1 GB disk at `/var/data` and sets `DATABASE_PATH=/var/data/data.db`. Without it the database is wiped on every deploy.
+2. **Whatnot**: whatnot.com/dashboard/developer → Personal access tokens → new token with `read:orders`, `read:inventory`, `write:inventory`. Set it as `WHATNOT_API_TOKEN`.
+3. **eBay**: developer.ebay.com → create a Production keyset (`EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`), then User Tokens → add a RuName (`EBAY_RU_NAME`) whose "auth accepted URL" is `https://<site>/api/inventory/ebay/callback`. Then click **Connect eBay** on the admin page.
+
+| Variable | Description |
+| --- | --- |
+| `ADMIN_KEY` | Password for the admin page and `GET /api/pickup-requests`. |
+| `DATABASE_PATH` | SQLite file path (persistent disk on Render). |
+| `WHATNOT_API_TOKEN` | Whatnot Seller API personal access token. |
+| `WHATNOT_WEBHOOK_SECRET` | Optional. Webhook signing secret (`wn_wh_…`). |
+| `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` / `EBAY_RU_NAME` | eBay Production app keys and RuName. |
+| `INVENTORY_POLL_SECONDS` | Optional. Order check interval, default 60. |
+
 ## Service area
 
 Murrieta · Menifee · Temecula · surrounding Riverside County, CA.
