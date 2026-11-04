@@ -6,9 +6,29 @@ services:
     buildCommand: npm ci --include=dev && npm run build
     startCommand: NODE_ENV=production node dist/index.cjs
     healthCheckPath: /
+    # Persistent disk so the SQLite database (pickup requests, inventory
+    # sync) survives deploys. Render's normal filesystem is wiped each deploy.
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
+      - key: DATABASE_PATH
+        value: /var/data/data.db
+      - key: ADMIN_KEY
+        sync: false
+      - key: WHATNOT_API_TOKEN
+        sync: false
+      - key: WHATNOT_WEBHOOK_SECRET
+        sync: false
+      - key: EBAY_CLIENT_ID
+        sync: false
+      - key: EBAY_CLIENT_SECRET
+        sync: false
+      - key: EBAY_RU_NAME
+        sync: false
       - key: EMAIL_TO
         value: thelastmilebooks@gmail.com,haylee@lastmilebooks.com
       - key: EMAIL_REPLY_TO

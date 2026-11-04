@@ -42,3 +42,67 @@ export const insertPickupRequestSchema = createInsertSchema(pickupRequests, {
 
 export type InsertPickupRequest = z.infer<typeof insertPickupRequestSchema>;
 export type PickupRequest = typeof pickupRequests.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Cross-marketplace inventory sync (Whatnot + eBay; Amazon later).
+// One row per book. The SKU must match the Whatnot variant SKU and the eBay
+// "Custom label" so listings can be matched automatically.
+// ---------------------------------------------------------------------------
+
+export const inventoryItems = sqliteTable("inventory_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sku: text("sku").notNull().unique(),
+  title: text("title").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  whatnotVariantId: text("whatnot_variant_id"),
+  ebayItemId: text("ebay_item_id"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+// Every sale we have already acted on, so a sale is never applied twice
+// (webhook retries, overlapping polls).
+export const processedSales = sqliteTable("processed_sales", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  // "<platform>:<order id>:<line item id>"
+  saleKey: text("sale_key").notNull().unique(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+// Human-readable history shown on the inventory admin page.
+export const syncEvents = sqliteTable("sync_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  level: text("level").notNull(), // "info" | "warn" | "error"
+  message: text("message").notNull(),
+  sku: text("sku"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+// Small key/value store for poll checkpoints and the eBay refresh token.
+export const syncState = sqliteTable("sync_state", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
+export const PLATFORMS = ["whatnot", "ebay"] as const;
+export type Platform = (typeof PLATFORMS)[number];
+
+export const upsertInventoryItemSchema = z.object({
+  sku: z.string().trim().min(1, "SKU is required"),
+  title: z.string().trim().min(1, "Title is required"),
+  quantity: z.number().int().min(0),
+  whatnotVariantId: z.string().trim().min(1).nullable().optional(),
+  ebayItemId: z.string().trim().regex(/^\d+$/, "eBay item IDs are numbers").nullable().optional(),
+});
+
+export type UpsertInventoryItem = z.infer<typeof upsertInventoryItemSchema>;
+export type InventoryItem = typeof inventoryItems.$inferSelect;
+export type SyncEvent = typeof syncEvents.$inferSelect;
