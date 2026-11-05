@@ -1,3 +1,4 @@
+import express from "express";
 import type { Express, NextFunction, Request, Response } from "express";
 import crypto from "node:crypto";
 import { upsertInventoryItemSchema } from "@shared/schema";
@@ -6,6 +7,7 @@ import { inventoryStore } from "./store";
 import * as whatnot from "./whatnot";
 import * as ebay from "./ebay";
 import * as listings from "./listings";
+import { parseActiveListingsReport, ReportError } from "./ebayReport";
 import { handleWhatnotOrder, importListings, pushQuantity, runSyncOnce } from "./sync";
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
@@ -123,7 +125,7 @@ export function registerInventoryRoutes(app: Express) {
         inventoryStore.log("warn", `eBay price search failed: ${marketError}`);
       }
     }
-    res.json({ code, listings: found, market, marketError });
+    res.json({ code, listings: found, market, marketError, marketAvailable: ebay.ebayAppConfigured() });
   });
 
   app.put("/api/scan/settings", requireAdmin, (req, res) => {
@@ -134,6 +136,38 @@ export function registerInventoryRoutes(app: Express) {
     listings.saveScanSettings(parsed.data);
     res.json(parsed.data);
   });
+
+  // Seller Hub report upload, for when the eBay API isn't available. Replaces
+  // the whole list, so an empty or unrecognized file changes nothing.
+  app.post(
+    "/api/scan/import",
+    requireAdmin,
+    express.text({ type: "text/csv", limit: "25mb" }),
+    (req, res) => {
+      const shipping = req.query.shipping === undefined ? null : Number(req.query.shipping);
+      if (shipping !== null && (!Number.isFinite(shipping) || shipping < 0)) {
+        return res.status(400).json({ error: "Enter a valid shipping amount" });
+      }
+      if (listings.isRefreshing()) {
+        return res.status(409).json({ error: "A refresh is running. Try again in a few minutes." });
+      }
+      try {
+        const report = parseActiveListingsReport(typeof req.body === "string" ? req.body : "", shipping);
+        if (report.listings.length === 0) {
+          return res.status(400).json({ error: "No listings found in this file. Nothing was changed." });
+        }
+        listings.importReport(report.listings);
+        res.json({
+          imported: report.listings.length,
+          skipped: report.skipped,
+          withIsbn: report.listings.filter((l) => l.isbn).length,
+        });
+      } catch (e) {
+        if (e instanceof ReportError) return res.status(400).json({ error: e.message });
+        throw e;
+      }
+    },
+  );
 
   // Starts in the background: the first run reads every listing one by one.
   app.post("/api/scan/refresh", requireAdmin, (_req, res) => {

@@ -93,6 +93,7 @@ Phone page at `/#/scan` (enter `ADMIN_KEY`; it's remembered on the device). Scan
 
 - Uses the eBay connection from the inventory sync, so connect eBay first. It needs no extra setup.
 - Every active listing is copied into the `ebay_listings` table every 15 minutes (or with **Refresh**). ISBNs need one eBay call per listing, so the first run takes a while on a big store. They're fetched up to 1,000 at a time, then re-checked weekly.
+- Without eBay API access, upload Seller Hub's "All active listings" report on the **Inventory** tab. It replaces the list, and prices stay as they were in the file until the next upload. Reports don't include shipping, so enter what buyers pay when uploading.
 - A scan matches the listing's ISBN (either length) or its Custom label. Books you don't have listed show the cheapest fixed-price US listings from other sellers instead.
 - Profit = book price + shipping charged − eBay fees − postage and supplies − cost of the book. eBay's fee is charged on the total including shipping and the buyer's sales tax. Set the rates and your costs on the **Costs** tab; the calculation is in `shared/profit.ts`. Calculated-shipping listings assume the buyer's shipping equals your postage. Promoted Listings fees aren't included.
 

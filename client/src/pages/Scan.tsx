@@ -40,6 +40,7 @@ interface LookupResponse {
   listings: EbayListingRow[];
   market: MarketOffer[];
   marketError: string | null;
+  marketAvailable: boolean;
 }
 
 function readKey(): string {
@@ -65,7 +66,8 @@ function ago(iso: string): string {
   const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes} min ago`;
-  return `${Math.round(minutes / 60)} hr ago`;
+  if (minutes < 48 * 60) return `${Math.round(minutes / 60)} hr ago`;
+  return `${Math.round(minutes / 1440)} days ago`;
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -219,6 +221,65 @@ function CameraScanner({ onCode }: { onCode: (code: string) => void }) {
       </Button>
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
+  );
+}
+
+function ReportImport({ onImport }: { onImport: (file: File, shipping: string) => Promise<void> }) {
+  const [shipping, setShipping] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const shippingValid = shipping.trim() === "" || Number(shipping) >= 0;
+
+  return (
+    <details className="rounded-md border p-3 text-sm">
+      <summary className="cursor-pointer font-medium">Upload eBay report</summary>
+      <div className="mt-3 space-y-3">
+        <p className="text-xs text-muted-foreground">
+          In Seller Hub: Reports → Downloads → Download report → Listings → All active listings. Upload the file as
+          eBay gives it, because opening and saving it in Excel can damage ISBNs. This replaces the list here.
+        </p>
+        <div className="space-y-1">
+          <Label htmlFor="report-shipping">Shipping buyers pay ($)</Label>
+          <Input
+            id="report-shipping"
+            inputMode="decimal"
+            value={shipping}
+            onChange={(e) => setShipping(e.target.value)}
+            data-testid="input-report-shipping"
+          />
+          <p className="text-xs text-muted-foreground">
+            Leave blank when buyers pay the postage. Enter a flat rate only if you charge one.
+          </p>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file) return;
+            setBusy(true);
+            try {
+              await onImport(file, shipping.trim());
+            } finally {
+              setBusy(false);
+            }
+          }}
+          data-testid="input-report-file"
+        />
+        <Button
+          className="w-full"
+          variant="secondary"
+          disabled={busy || !shippingValid}
+          onClick={() => fileRef.current?.click()}
+          data-testid="button-report-upload"
+        >
+          {busy ? "Uploading…" : "Choose file"}
+        </Button>
+      </div>
+    </details>
   );
 }
 
@@ -399,9 +460,11 @@ export default function Scan() {
       <h1 className="text-xl font-semibold">Book scanner</h1>
 
       {status && !status.connected && (
-        <p className="rounded-md border border-destructive/40 p-3 text-sm">
-          eBay isn't connected yet. Use <Link href="/inventory" className="underline">the inventory page</Link> to
-          connect it.
+        <p className="rounded-md border p-3 text-sm" data-testid="text-not-connected">
+          {data?.listings.length
+            ? `Using your uploaded eBay report${status.refreshedAt ? ` from ${ago(status.refreshedAt)}` : ""}. Prices won't update until you upload a new one.`
+            : "eBay isn't connected yet. Upload an eBay report on the Inventory tab to get started."}{" "}
+          <Link href="/inventory" className="underline">Connect eBay</Link>
         </p>
       )}
 
@@ -469,7 +532,7 @@ export default function Scan() {
                       </CardContent>
                     </Card>
                   ))}
-                  {lookup.market.length === 0 && !lookup.marketError && (
+                  {lookup.marketAvailable && lookup.market.length === 0 && !lookup.marketError && (
                     <p className="text-sm text-muted-foreground">No other fixed-price listings found either.</p>
                   )}
                   {lookup.marketError && (
@@ -504,6 +567,27 @@ export default function Scan() {
               {refreshing ? "Refreshing…" : "Refresh"}
             </Button>
           </div>
+          <ReportImport
+            onImport={async (file, shipping) => {
+              try {
+                const qs = shipping ? `?shipping=${encodeURIComponent(shipping)}` : "";
+                const res = await fetch(`/api/scan/import${qs}`, {
+                  method: "POST",
+                  headers: { "x-admin-key": adminKey, "Content-Type": "text/csv" },
+                  body: await file.text(),
+                });
+                const json = await res.json();
+                if (!res.ok) throw new Error(json.error ?? `Request failed (${res.status})`);
+                await load();
+                toast({
+                  title: `Loaded ${json.imported} listings`,
+                  description: `${json.withIsbn} have an ISBN${json.skipped ? `; ${json.skipped} rows skipped` : ""}.`,
+                });
+              } catch (e) {
+                toast({ title: "Upload failed", description: (e as Error).message, variant: "destructive" });
+              }
+            }}
+          />
           {Boolean(status?.missingIsbn) && (
             <p className="text-xs text-muted-foreground">
               No ISBN on eBay for {status!.missingIsbn} {status!.missingIsbn === 1 ? "listing" : "listings"}, so a scan

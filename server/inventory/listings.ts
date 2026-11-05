@@ -2,10 +2,11 @@ import { ebayListings } from "@shared/schema";
 import type { EbayListingRow } from "@shared/schema";
 import { DEFAULT_SCAN_SETTINGS, scanSettingsSchema, toIsbn13 } from "@shared/profit";
 import type { ScanSettings } from "@shared/profit";
-import { asc, eq, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import { db } from "../storage";
 import { inventoryStore } from "./store";
 import * as ebay from "./ebay";
+import type { ReportListing } from "./ebayReport";
 
 // Local copy of the seller's active eBay listings for the barcode scanner, so
 // a scan answers instantly. Titles, prices and quantities are refreshed every
@@ -31,38 +32,54 @@ export async function refreshListings(): Promise<void> {
     const now = new Date().toISOString();
     const active = await ebay.listActiveListings();
 
-    const activeIds = new Set(active.map((l) => l.itemId));
-    db.transaction((tx) => {
-      for (const row of tx.select({ itemId: ebayListings.itemId }).from(ebayListings).all()) {
-        if (!activeIds.has(row.itemId)) {
-          tx.delete(ebayListings).where(eq(ebayListings.itemId, row.itemId)).run();
-        }
-      }
-      for (const l of active) {
-        tx.insert(ebayListings)
-          .values({ ...l, updatedAt: now })
-          .onConflictDoUpdate({
-            target: ebayListings.itemId,
-            set: {
-              sku: l.sku,
-              title: l.title,
-              price: l.price,
-              quantity: l.quantity,
-              url: l.url,
-              updatedAt: now,
-            },
-          })
-          .run();
-      }
-    });
-    inventoryStore.setState(REFRESHED_KEY, now);
-
+    replaceListings(active, now);
     await fillMissingDetails();
   } catch (e) {
     inventoryStore.log("error", `eBay listing refresh failed: ${(e as Error).message}`);
   } finally {
     refreshing = false;
   }
+}
+
+// Makes the table match a complete list of active listings. Details are only
+// passed by a report import, and never replace ones read from the API.
+function replaceListings(active: (ebay.EbayActiveListing | ReportListing)[], now: string): void {
+  const activeIds = new Set(active.map((l) => l.itemId));
+  db.transaction((tx) => {
+    for (const row of tx.select({ itemId: ebayListings.itemId }).from(ebayListings).all()) {
+      if (!activeIds.has(row.itemId)) {
+        tx.delete(ebayListings).where(eq(ebayListings.itemId, row.itemId)).run();
+      }
+    }
+    for (const l of active) {
+      tx.insert(ebayListings)
+        .values({ ...l, updatedAt: now })
+        .onConflictDoUpdate({
+          target: ebayListings.itemId,
+          set: {
+            sku: l.sku,
+            title: l.title,
+            price: l.price,
+            quantity: l.quantity,
+            url: l.url,
+            updatedAt: now,
+          },
+        })
+        .run();
+      if ("isbn" in l) {
+        tx.update(ebayListings)
+          .set({ isbn: l.isbn, shipping: l.shipping, condition: l.condition })
+          .where(and(eq(ebayListings.itemId, l.itemId), isNull(ebayListings.detailsFetchedAt)))
+          .run();
+      }
+    }
+  });
+  inventoryStore.setState(REFRESHED_KEY, now);
+}
+
+export function importReport(listings: ReportListing[]): void {
+  replaceListings(listings, new Date().toISOString());
+  inventoryStore.log("info", `Loaded ${listings.length} eBay listings from a report`);
 }
 
 async function fillMissingDetails(): Promise<void> {
@@ -110,10 +127,13 @@ export function findListings(code: string): EbayListingRow[] {
 }
 
 export function listingStatus() {
-  const unscannable = (l: EbayListingRow) => l.detailsFetchedAt && !l.isbn && !toIsbn13(l.sku ?? "");
+  const connected = ebay.ebayConnected();
+  // Connected listings without details yet may still get an ISBN from eBay.
+  const unscannable = (l: EbayListingRow) =>
+    (l.detailsFetchedAt || !connected) && !l.isbn && !toIsbn13(l.sku ?? "");
   const missingIsbn = listAllListings().filter(unscannable).length;
   return {
-    connected: ebay.ebayConnected(),
+    connected,
     refreshing,
     refreshedAt: inventoryStore.getState(REFRESHED_KEY) ?? null,
     missingIsbn,
