@@ -6,6 +6,7 @@ import { insertPickupRequestSchema } from "@shared/schema";
 import { sendPickupRequestEmail } from "./email";
 import { registerInventoryRoutes } from "./inventory/routes";
 import { startInventorySync } from "./inventory/sync";
+import { startListingRefresh } from "./inventory/listings";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -53,6 +54,7 @@ export async function registerRoutes(
   // Cross-marketplace inventory sync (admin page at /#/inventory)
   registerInventoryRoutes(app);
   startInventorySync();
+  startListingRefresh();
 
   return httpServer;
 }

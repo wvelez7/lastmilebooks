@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -91,6 +91,26 @@ export const syncState = sqliteTable("sync_state", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+// Every active eBay listing, for the barcode scanner (/#/scan). Separate from
+// inventory_items because it includes listings with no SKU and is only ever
+// read from eBay, never pushed back.
+export const ebayListings = sqliteTable("ebay_listings", {
+  itemId: text("item_id").primaryKey(),
+  sku: text("sku"),
+  title: text("title").notNull(),
+  isbn: text("isbn"), // ISBN-13, null if the listing has none
+  price: real("price").notNull(),
+  shipping: real("shipping"), // what the buyer pays; null = calculated
+  quantity: integer("quantity").notNull().default(1),
+  condition: text("condition"),
+  imageUrl: text("image_url"),
+  url: text("url"),
+  detailsFetchedAt: text("details_fetched_at"), // ISBN etc. come from a slower per-item call
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type EbayListingRow = typeof ebayListings.$inferSelect;
 
 export const PLATFORMS = ["whatnot", "ebay"] as const;
 export type Platform = (typeof PLATFORMS)[number];

@@ -1,9 +1,11 @@
 import type { Express, NextFunction, Request, Response } from "express";
 import crypto from "node:crypto";
 import { upsertInventoryItemSchema } from "@shared/schema";
+import { scanSettingsSchema, toIsbn13 } from "@shared/profit";
 import { inventoryStore } from "./store";
 import * as whatnot from "./whatnot";
 import * as ebay from "./ebay";
+import * as listings from "./listings";
 import { handleWhatnotOrder, importListings, pushQuantity, runSyncOnce } from "./sync";
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
@@ -95,6 +97,49 @@ export function registerInventoryRoutes(app: Express) {
       inventoryStore.log("error", `eBay connect failed: ${(e as Error).message}`);
       res.redirect("/?ebay=failed#/inventory");
     }
+  });
+
+  // Barcode scanner (admin page at /#/scan). Profit is worked out on the page
+  // from these numbers, so changing a setting updates it instantly.
+  app.get("/api/scan/listings", requireAdmin, (_req, res) => {
+    res.json({
+      status: listings.listingStatus(),
+      settings: listings.getScanSettings(),
+      listings: listings.listAllListings(),
+    });
+  });
+
+  app.get("/api/scan/lookup/:code", requireAdmin, async (req, res) => {
+    const code = String(req.params.code).trim();
+    const found = listings.findListings(code);
+    let market: ebay.EbayMarketOffer[] = [];
+    let marketError: string | null = null;
+    // Not one of ours: show what the book is going for instead.
+    if (found.length === 0 && ebay.ebayAppConfigured() && /^\d{8,14}$/.test(code)) {
+      try {
+        market = await ebay.searchMarket(toIsbn13(code) ?? code);
+      } catch (e) {
+        marketError = (e as Error).message;
+        inventoryStore.log("warn", `eBay price search failed: ${marketError}`);
+      }
+    }
+    res.json({ code, listings: found, market, marketError });
+  });
+
+  app.put("/api/scan/settings", requireAdmin, (req, res) => {
+    const parsed = scanSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "validation_failed", details: parsed.error.flatten().fieldErrors });
+    }
+    listings.saveScanSettings(parsed.data);
+    res.json(parsed.data);
+  });
+
+  // Starts in the background: the first run reads every listing one by one.
+  app.post("/api/scan/refresh", requireAdmin, (_req, res) => {
+    if (!ebay.ebayConnected()) return res.status(400).json({ error: "Connect eBay on the inventory page first" });
+    void listings.refreshListings();
+    res.status(202).json({ refreshing: true });
   });
 
   // Whatnot webhook (orders.created / orders.updated). Optional: polling

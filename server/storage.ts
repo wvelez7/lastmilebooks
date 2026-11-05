@@ -54,6 +54,23 @@ sqlite.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS ebay_listings (
+    item_id TEXT PRIMARY KEY,
+    sku TEXT,
+    title TEXT NOT NULL,
+    isbn TEXT,
+    price REAL NOT NULL,
+    shipping REAL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    condition TEXT,
+    image_url TEXT,
+    url TEXT,
+    details_fetched_at TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS ebay_listings_isbn ON ebay_listings (isbn);
+  CREATE INDEX IF NOT EXISTS ebay_listings_sku ON ebay_listings (sku);
 `);
 
 export const db = drizzle(sqlite);

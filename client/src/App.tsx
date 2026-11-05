@@ -7,12 +7,14 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Inventory from "@/pages/Inventory";
+import Scan from "@/pages/Scan";
 
 function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/inventory" component={Inventory} />
+      <Route path="/scan" component={Scan} />
       <Route component={NotFound} />
     </Switch>
   );

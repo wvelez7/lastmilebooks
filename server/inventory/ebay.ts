@@ -1,3 +1,4 @@
+import { toIsbn13 } from "@shared/profit";
 import { inventoryStore } from "./store";
 
 // eBay: OAuth user token (authorization-code grant, refreshed automatically),
@@ -151,7 +152,8 @@ async function trading(callName: string, innerXml: string): Promise<string> {
 }
 
 function tag(xml: string, name: string): string | undefined {
-  const m = xml.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
+  // Attributes are allowed: prices look like <CurrentPrice currencyID="USD">.
+  const m = xml.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`));
   return m ? decodeXml(m[1]) : undefined;
 }
 
@@ -193,7 +195,22 @@ export interface EbayListing {
 
 // Active listings that have a Custom label (SKU), for matching against Whatnot.
 export async function listListings(): Promise<EbayListing[]> {
-  const out: EbayListing[] = [];
+  const all = await listActiveListings();
+  return all.flatMap((l) => (l.sku ? [{ ...l, sku: l.sku }] : []));
+}
+
+export interface EbayActiveListing {
+  itemId: string;
+  sku: string | null;
+  title: string;
+  quantity: number;
+  price: number;
+  url: string | null;
+}
+
+// Every active listing, with or without a Custom label.
+export async function listActiveListings(): Promise<EbayActiveListing[]> {
+  const out: EbayActiveListing[] = [];
   for (let pageNumber = 1; ; pageNumber++) {
     const xml = await trading(
       "GetMyeBaySelling",
@@ -201,17 +218,123 @@ export async function listListings(): Promise<EbayListing[]> {
     );
     const active = xml.match(/<ActiveList>([\s\S]*?)<\/ActiveList>/)?.[1] ?? "";
     for (const item of active.match(/<Item>[\s\S]*?<\/Item>/g) ?? []) {
-      const sku = tag(item, "SKU")?.trim();
+      const sku = tag(item, "SKU")?.trim() || null;
       const itemId = tag(item, "ItemID");
-      if (!sku || !itemId) continue;
+      if (!itemId) continue;
       out.push({
         itemId,
         sku,
-        title: tag(item, "Title") ?? sku,
+        title: tag(item, "Title") ?? sku ?? itemId,
         quantity: Number(tag(item, "QuantityAvailable") ?? tag(item, "Quantity") ?? 0),
+        price: Number(tag(item, "CurrentPrice") ?? tag(item, "BuyItNowPrice") ?? 0),
+        url: tag(item, "ViewItemURL") ?? null,
       });
     }
     const totalPages = Number(tag(active, "TotalNumberOfPages") ?? 1);
     if (pageNumber >= totalPages) return out;
   }
+}
+
+export interface EbayListingDetails {
+  isbn: string | null;
+  shipping: number | null;
+  condition: string | null;
+  imageUrl: string | null;
+}
+
+// The listing call has no ISBN, so this reads it from the item's specifics or
+// catalog product. One API call per listing; callers cache the result.
+export async function getListingDetails(itemId: string): Promise<EbayListingDetails> {
+  if (!/^\d+$/.test(itemId)) throw new Error(`Invalid eBay item ID "${itemId}"`);
+  const xml = await trading(
+    "GetItem",
+    `<ItemID>${itemId}</ItemID><DetailLevel>ReturnAll</DetailLevel><IncludeItemSpecifics>true</IncludeItemSpecifics>`,
+  );
+  return parseListingDetails(xml);
+}
+
+export function parseListingDetails(xml: string): EbayListingDetails {
+  const candidates = [tag(xml, "ISBN")];
+  for (const pair of xml.match(/<NameValueList>[\s\S]*?<\/NameValueList>/g) ?? []) {
+    if (!/^ISBN/i.test(tag(pair, "Name") ?? "")) continue;
+    for (const v of pair.match(/<Value>[\s\S]*?<\/Value>/g) ?? []) candidates.push(tag(v, "Value"));
+  }
+  const isbn = candidates.map((c) => (c ? toIsbn13(c) : null)).find(Boolean) ?? null;
+
+  const shippingBlock = tag(xml, "ShippingDetails") ?? "";
+  const flat = !/Calculated/i.test(tag(shippingBlock, "ShippingType") ?? "");
+  const cost = tag(shippingBlock, "ShippingServiceCost");
+  return {
+    isbn,
+    shipping: flat && cost !== undefined ? Number(cost) : null,
+    condition: tag(xml, "ConditionDisplayName") ?? null,
+    imageUrl: tag(xml, "GalleryURL") ?? tag(xml, "PictureURL") ?? null,
+  };
+}
+
+// ---- What others charge (Browse API) ---------------------------------------
+
+export interface EbayMarketOffer {
+  title: string;
+  price: number;
+  shipping: number | null;
+  condition: string | null;
+  url: string | null;
+  imageUrl: string | null;
+}
+
+interface BrowseItem {
+  title: string;
+  price?: { value: string };
+  shippingOptions?: { shippingCost?: { value: string } }[];
+  condition?: string;
+  itemWebUrl?: string;
+  image?: { imageUrl: string };
+}
+
+// Browse requires an application token, separate from the seller's user token.
+let cachedAppToken: { token: string; expiresAt: number } | null = null;
+
+async function appToken(): Promise<string> {
+  if (cachedAppToken && cachedAppToken.expiresAt - 60_000 > Date.now()) return cachedAppToken.token;
+  const json = await tokenRequest({
+    grant_type: "client_credentials",
+    scope: "https://api.ebay.com/oauth/api_scope",
+  });
+  cachedAppToken = { token: json.access_token!, expiresAt: Date.now() + (json.expires_in ?? 7200) * 1000 };
+  return cachedAppToken.token;
+}
+
+// The cheapest fixed-price US listings for a barcode, cheapest (with shipping) first.
+export async function searchMarket(gtin: string, limit = 3): Promise<EbayMarketOffer[]> {
+  const qs = new URLSearchParams({
+    gtin,
+    filter: "buyingOptions:{FIXED_PRICE},itemLocationCountry:US",
+    sort: "price",
+    limit: "20",
+  });
+  const res = await fetch(`${API_HOST}/buy/browse/v1/item_summary/search?${qs}`, {
+    headers: {
+      Authorization: `Bearer ${await appToken()}`,
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`eBay search failed: ${res.status} ${(await res.text()).slice(0, 300)}`);
+  }
+  const page = (await res.json()) as { itemSummaries?: BrowseItem[] };
+  const offers: EbayMarketOffer[] = (page.itemSummaries ?? []).map((i) => {
+    const shipping = i.shippingOptions?.[0]?.shippingCost?.value;
+    return {
+      title: i.title,
+      price: Number(i.price?.value ?? 0),
+      shipping: shipping === undefined ? null : Number(shipping),
+      condition: i.condition ?? null,
+      url: i.itemWebUrl ?? null,
+      imageUrl: i.image?.imageUrl ?? null,
+    };
+  });
+  return offers
+    .sort((a, b) => a.price + (a.shipping ?? 0) - (b.price + (b.shipping ?? 0)))
+    .slice(0, limit);
 }

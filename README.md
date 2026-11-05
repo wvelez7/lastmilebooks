@@ -87,6 +87,15 @@ Setup:
 | `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` / `EBAY_RU_NAME` | eBay Production app keys and RuName. |
 | `INVENTORY_POLL_SECONDS` | Optional. Order check interval, default 60. |
 
+## Book scanner
+
+Phone page at `/#/scan` (enter `ADMIN_KEY`; it's remembered on the device). Scan a barcode with the camera, or use a USB/Bluetooth scanner or the text box, to see the eBay price and estimated profit. Add it to the phone's home screen to use it like an app. The camera only works over `https://`.
+
+- Uses the eBay connection from the inventory sync, so connect eBay first. It needs no extra setup.
+- Every active listing is copied into the `ebay_listings` table every 15 minutes (or with **Refresh**). ISBNs need one eBay call per listing, so the first run takes a while on a big store. They're fetched up to 1,000 at a time, then re-checked weekly.
+- A scan matches the listing's ISBN (either length) or its Custom label. Books you don't have listed show the cheapest fixed-price US listings from other sellers instead.
+- Profit = book price + shipping charged − eBay fees − postage and supplies − cost of the book. eBay's fee is charged on the total including shipping and the buyer's sales tax. Set the rates and your costs on the **Costs** tab; the calculation is in `shared/profit.ts`. Calculated-shipping listings assume the buyer's shipping equals your postage. Promoted Listings fees aren't included.
+
 ## Service area
 
 Murrieta · Menifee · Temecula · surrounding Riverside County, CA.
