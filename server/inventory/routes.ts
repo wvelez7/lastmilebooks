@@ -71,14 +71,6 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.get("/api/inventory/whatnot-check", requireAdmin, async (_req, res) => {
-    try {
-      res.json(await whatnot.checkProducts());
-    } catch (e) {
-      res.status(502).json({ error: (e as Error).message });
-    }
-  });
-
   app.post("/api/inventory/sync", requireAdmin, async (_req, res) => {
     await runSyncOnce();
     res.status(204).end();

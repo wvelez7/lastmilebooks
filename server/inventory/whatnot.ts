@@ -158,34 +158,18 @@ export async function listListings(): Promise<WhatnotListing[]> {
   return out;
 }
 
-// What the API returns for this token, for working out why listings don't match.
-export async function checkProducts() {
-  const raw = await request<Record<string, unknown>>("GET", "/products?limit=50");
-  const products = (raw.data ?? []) as (WhatnotProduct & Record<string, unknown>)[];
-  const results = [];
-  for (const product of products) {
-    const variants: Page<WhatnotVariant> = await request(
-      "GET",
-      `/products/${encodeURIComponent(product.id)}/variants?limit=50`,
-    );
-    results.push({
-      title: product.title,
-      id: product.id,
-      options: (product.options as unknown[] | undefined)?.length ?? 0,
-      variants: variants.data.length,
-      withSku: variants.data.filter((v) => v.sku).length,
-    });
-    await sleep(150);
-  }
-  return {
-    responseKeys: Object.keys(raw),
-    productKeys: Object.keys(products[0] ?? {}),
-    products: products.length,
-    more: Boolean(raw.next_cursor),
-    withVariants: results.filter((r) => r.variants > 0),
-    sample: results.slice(0, 2),
-    last: results.slice(-1),
-  };
+// CSV-imported products have no variants in the API, so they can't be matched by
+// SKU or have their quantity set. They can only be found by title.
+export async function hasProductTitled(title: string): Promise<boolean> {
+  let cursor: string | null = null;
+  do {
+    const qs = new URLSearchParams({ limit: "50" });
+    if (cursor) qs.set("cursor", cursor);
+    const page: Page<WhatnotProduct> = await request("GET", `/products?${qs}`);
+    if (page.data.some((p) => p.title.trim() === title.trim())) return true;
+    cursor = page.next_cursor;
+  } while (cursor);
+  return false;
 }
 
 // Standard Webhooks signature check: HMAC-SHA256 over "{id}.{timestamp}.{body}".

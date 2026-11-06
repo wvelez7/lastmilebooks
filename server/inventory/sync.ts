@@ -91,6 +91,24 @@ interface Sale {
   listingId?: string | null;
 }
 
+// An eBay sale can't reach a Whatnot listing that has no variant, so ask for it to
+// be pulled by hand rather than risk selling the same copy twice.
+async function warnIfOnWhatnot(title: string, sku?: string | null): Promise<void> {
+  if (!whatnot.whatnotConfigured()) return;
+  try {
+    if (!(await whatnot.hasProductTitled(title))) return;
+    inventoryStore.log("warn", `Sold on eBay, also on Whatnot: remove "${title}" by hand`, sku ?? undefined);
+    await sendTeamAlert(
+      `Remove from Whatnot: "${title}"`,
+      `"${title}" just sold on eBay and is also listed on Whatnot, where the sync can't update it.
+` +
+        `Remove it from Whatnot now so it doesn't sell twice.`,
+    );
+  } catch (e) {
+    inventoryStore.log("error", `Could not check Whatnot for "${title}": ${(e as Error).message}`, sku ?? undefined);
+  }
+}
+
 export async function recordSale(sale: Sale): Promise<void> {
   if (!inventoryStore.claimSale(sale.saleKey)) return; // already handled
 
@@ -104,6 +122,7 @@ export async function recordSale(sale: Sale): Promise<void> {
   if (!item) {
     // Normal for live-show books that were never cross-listed.
     inventoryStore.log("info", `Sold on ${sale.platform}, not cross-listed: ${sale.title}`, sale.sku);
+    if (sale.platform === "ebay") await warnIfOnWhatnot(sale.title, sale.sku);
     return;
   }
 
@@ -114,6 +133,9 @@ export async function recordSale(sale: Sale): Promise<void> {
     item.sku,
   );
   await pushQuantity(updated, sale.platform);
+  if (sale.platform === "ebay" && !updated.whatnotVariantId && updated.quantity === 0) {
+    await warnIfOnWhatnot(updated.title, updated.sku);
+  }
 }
 
 // ---- Whatnot ---------------------------------------------------------------
