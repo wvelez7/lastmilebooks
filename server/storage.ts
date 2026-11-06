@@ -71,6 +71,23 @@ sqlite.exec(`
   );
   CREATE INDEX IF NOT EXISTS ebay_listings_isbn ON ebay_listings (isbn);
   CREATE INDEX IF NOT EXISTS ebay_listings_sku ON ebay_listings (sku);
+
+  CREATE TABLE IF NOT EXISTS supplies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    reorder_at INTEGER NOT NULL DEFAULT 0,
+    reorder_quantity INTEGER NOT NULL DEFAULT 1,
+    used_per_order INTEGER NOT NULL DEFAULT 0,
+    supplier TEXT,
+    product_url TEXT,
+    unit_cost REAL,
+    ordered_quantity INTEGER,
+    ordered_at TEXT,
+    alerted_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 export const db = drizzle(sqlite);

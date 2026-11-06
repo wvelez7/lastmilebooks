@@ -112,6 +112,52 @@ export const ebayListings = sqliteTable("ebay_listings", {
 
 export type EbayListingRow = typeof ebayListings.$inferSelect;
 
+// Mailers, tape, labels and so on (admin page at /#/supplies). A row with
+// used_per_order above 0 goes down by itself with each marketplace order.
+export const supplies = sqliteTable("supplies", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  quantity: integer("quantity").notNull().default(0),
+  reorderAt: integer("reorder_at").notNull().default(0), // low at or below this
+  reorderQuantity: integer("reorder_quantity").notNull().default(1),
+  usedPerOrder: integer("used_per_order").notNull().default(0),
+  supplier: text("supplier"),
+  productUrl: text("product_url"),
+  unitCost: real("unit_cost"),
+  orderedQuantity: integer("ordered_quantity"), // null = nothing on the way
+  orderedAt: text("ordered_at"),
+  alertedAt: text("alerted_at"), // last low-stock email, cleared once restocked
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const upsertSupplySchema = z.object({
+  name: z.string().trim().min(1, "Name is required"),
+  quantity: z.number({ message: "Enter how many you have" }).int().min(0),
+  reorderAt: z.number({ message: "Enter when to reorder" }).int().min(0),
+  reorderQuantity: z.number({ message: "Enter how many to reorder" }).int().min(1, "Reorder at least 1"),
+  usedPerOrder: z.number({ message: "Enter how many each order uses" }).int().min(0),
+  supplier: z.string().trim().min(1).nullable(),
+  productUrl: z
+    .string()
+    .trim()
+    .url("Enter a full link starting with https://")
+    .refine((u) => /^https?:\/\//i.test(u), "Enter a full link starting with https://")
+    .nullable(),
+  unitCost: z.number().min(0).nullable(),
+});
+
+export type Supply = typeof supplies.$inferSelect;
+export type UpsertSupply = z.infer<typeof upsertSupplySchema>;
+
+export function isLowOnSupply(s: Pick<Supply, "quantity" | "reorderAt">): boolean {
+  return s.quantity <= s.reorderAt;
+}
+
 export const PLATFORMS = ["whatnot", "ebay"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 

@@ -1,9 +1,10 @@
 import express from "express";
 import type { Express, NextFunction, Request, Response } from "express";
 import crypto from "node:crypto";
-import { upsertInventoryItemSchema } from "@shared/schema";
+import { upsertInventoryItemSchema, upsertSupplySchema } from "@shared/schema";
 import { scanSettingsSchema, toIsbn13 } from "@shared/profit";
 import { inventoryStore } from "./store";
+import * as supplies from "./supplies";
 import * as whatnot from "./whatnot";
 import * as ebay from "./ebay";
 import * as listings from "./listings";
@@ -178,6 +179,65 @@ export function registerInventoryRoutes(app: Express) {
     if (!ebay.ebayConnected()) return res.status(400).json({ error: "Connect eBay on the inventory page first" });
     void listings.refreshListings();
     res.status(202).json({ refreshing: true });
+  });
+
+  // Shipping supplies (admin page at /#/supplies). Any stock change can cross a
+  // reorder point, so each route below re-checks and emails in the background.
+  app.get("/api/supplies", requireAdmin, (_req, res) => {
+    res.json({ supplies: supplies.listSupplies() });
+  });
+
+  app.post("/api/supplies", requireAdmin, (req, res) => {
+    const parsed = upsertSupplySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
+    const supply = supplies.createSupply(parsed.data);
+    void supplies.alertLowSupplies();
+    res.status(201).json(supply);
+  });
+
+  app.put("/api/supplies/:id", requireAdmin, (req, res) => {
+    const parsed = upsertSupplySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
+    const supply = supplies.updateSupply(Number(req.params.id), parsed.data);
+    if (!supply) return res.status(404).json({ error: "not_found" });
+    void supplies.alertLowSupplies();
+    res.json(supply);
+  });
+
+  app.delete("/api/supplies/:id", requireAdmin, (req, res) => {
+    if (!supplies.deleteSupply(Number(req.params.id))) return res.status(404).json({ error: "not_found" });
+    res.status(204).end();
+  });
+
+  app.post("/api/supplies/:id/adjust", requireAdmin, (req, res) => {
+    const by = req.body?.by;
+    if (!Number.isInteger(by)) return res.status(400).json({ error: "by must be a whole number" });
+    const supply = supplies.adjustSupply(Number(req.params.id), by);
+    if (!supply) return res.status(404).json({ error: "not_found" });
+    void supplies.alertLowSupplies();
+    res.json(supply);
+  });
+
+  app.post("/api/supplies/:id/order", requireAdmin, (req, res) => {
+    const supply = supplies.markOrdered(Number(req.params.id));
+    if (!supply) return res.status(404).json({ error: "not_found" });
+    inventoryStore.log("info", `Ordered ${supply.orderedQuantity} of ${supply.name}`);
+    res.json(supply);
+  });
+
+  app.delete("/api/supplies/:id/order", requireAdmin, (req, res) => {
+    const supply = supplies.cancelOrder(Number(req.params.id));
+    if (!supply) return res.status(404).json({ error: "not_found" });
+    void supplies.alertLowSupplies();
+    res.json(supply);
+  });
+
+  app.post("/api/supplies/:id/receive", requireAdmin, (req, res) => {
+    const supply = supplies.markReceived(Number(req.params.id));
+    if (!supply) return res.status(409).json({ error: "Nothing on order for this supply" });
+    inventoryStore.log("info", `Received ${supply.name}; ${supply.quantity} in stock`);
+    void supplies.alertLowSupplies();
+    res.json(supply);
   });
 
   // eBay requires this before Production keys work. GET proves we own the URL;

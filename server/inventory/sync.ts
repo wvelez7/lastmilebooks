@@ -2,6 +2,7 @@ import type { InventoryItem, Platform } from "@shared/schema";
 import { inventoryStore } from "./store";
 import * as whatnot from "./whatnot";
 import * as ebay from "./ebay";
+import { useSuppliesForOrder } from "./supplies";
 import { sendTeamAlert } from "../email";
 
 // How it works: when a book sells on one marketplace, its quantity here goes
@@ -111,6 +112,11 @@ async function warnIfOnWhatnot(title: string, sku?: string | null): Promise<void
 
 export async function recordSale(sale: Sale): Promise<void> {
   if (!inventoryStore.claimSale(sale.saleKey)) return; // already handled
+
+  // Before the lookup below: books that aren't cross-listed still ship.
+  await useSuppliesForOrder(sale.saleKey.slice(0, sale.saleKey.lastIndexOf(":"))).catch((e) =>
+    inventoryStore.log("error", `Could not update supplies: ${(e as Error).message}`),
+  );
 
   const item =
     (sale.listingId &&

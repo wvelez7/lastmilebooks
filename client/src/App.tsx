@@ -8,6 +8,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Inventory from "@/pages/Inventory";
 import Scan from "@/pages/Scan";
+import Supplies from "@/pages/Supplies";
 
 function AppRouter() {
   return (
@@ -15,6 +16,7 @@ function AppRouter() {
       <Route path="/" component={Home} />
       <Route path="/inventory" component={Inventory} />
       <Route path="/scan" component={Scan} />
+      <Route path="/supplies" component={Supplies} />
       <Route component={NotFound} />
     </Switch>
   );
