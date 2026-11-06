@@ -158,6 +158,25 @@ export async function listListings(): Promise<WhatnotListing[]> {
   return out;
 }
 
+// What the API returns for this token, for working out why listings don't match.
+export async function checkProducts() {
+  const raw = await request<Record<string, unknown>>("GET", "/products?limit=50");
+  const products = (raw.data ?? []) as WhatnotProduct[];
+  const sample = [];
+  for (const product of products.slice(0, 5)) {
+    const variants: Page<WhatnotVariant> = await request(
+      "GET",
+      `/products/${encodeURIComponent(product.id)}/variants?limit=50`,
+    );
+    sample.push({
+      title: product.title,
+      variants: variants.data.length,
+      withSku: variants.data.filter((v) => v.sku).length,
+    });
+  }
+  return { responseKeys: Object.keys(raw), products: products.length, more: Boolean(raw.next_cursor), sample };
+}
+
 // Standard Webhooks signature check: HMAC-SHA256 over "{id}.{timestamp}.{body}".
 export function verifyWebhook(
   rawBody: Buffer,
