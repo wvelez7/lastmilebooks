@@ -86,6 +86,7 @@ Setup:
 | `WHATNOT_API_TOKEN` | Whatnot Seller API personal access token. |
 | `WHATNOT_WEBHOOK_SECRET` | Optional. Webhook signing secret (`wn_wh_…`). |
 | `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` / `EBAY_RU_NAME` | eBay Production app keys and RuName. |
+| `EBAY_VERIFICATION_TOKEN` | Token for eBay's Marketplace Account Deletion check, required before Production keys work. The endpoint is `https://<site>/api/ebay/account-deletion`. |
 | `INVENTORY_POLL_SECONDS` | Optional. Order check interval, default 60. |
 
 ## Book scanner

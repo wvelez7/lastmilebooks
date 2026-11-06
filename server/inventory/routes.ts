@@ -21,6 +21,10 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+// Must exactly match the endpoint URL entered in the eBay developer portal.
+const EBAY_DELETION_ENDPOINT =
+  process.env.EBAY_DELETION_ENDPOINT || "https://lastmilebooks.com/api/ebay/account-deletion";
+
 // OAuth `state` values for eBay connect, valid for 10 minutes.
 const ebayStates = new Map<string, number>();
 
@@ -174,6 +178,22 @@ export function registerInventoryRoutes(app: Express) {
     if (!ebay.ebayConnected()) return res.status(400).json({ error: "Connect eBay on the inventory page first" });
     void listings.refreshListings();
     res.status(202).json({ refreshing: true });
+  });
+
+  // eBay requires this before Production keys work. GET proves we own the URL;
+  // POST is a notice that some eBay member closed their account. We keep no
+  // buyer data, so there's nothing to delete and the notice is just acknowledged.
+  app.get("/api/ebay/account-deletion", (req, res) => {
+    const code = req.query.challenge_code;
+    const token = process.env.EBAY_VERIFICATION_TOKEN;
+    if (!token) return res.status(503).json({ error: "EBAY_VERIFICATION_TOKEN is not set" });
+    if (typeof code !== "string" || !code) return res.status(400).json({ error: "challenge_code is required" });
+    const hash = crypto.createHash("sha256").update(code).update(token).update(EBAY_DELETION_ENDPOINT);
+    res.status(200).json({ challengeResponse: hash.digest("hex") });
+  });
+
+  app.post("/api/ebay/account-deletion", (_req, res) => {
+    res.status(204).end();
   });
 
   // Whatnot webhook (orders.created / orders.updated). Optional: polling

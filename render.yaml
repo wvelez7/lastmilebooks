@@ -29,6 +29,8 @@ services:
         sync: false
       - key: EBAY_RU_NAME
         sync: false
+      - key: EBAY_VERIFICATION_TOKEN
+        sync: false
       - key: EMAIL_TO
         value: thelastmilebooks@gmail.com,haylee@lastmilebooks.com
       - key: EMAIL_REPLY_TO

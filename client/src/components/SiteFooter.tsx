@@ -128,7 +128,12 @@ export function SiteFooter() {
         </div>
 
         <div className="mt-8 flex items-center justify-between border-t border-border/70 pt-6 text-xs text-muted-foreground">
-          <span>© {new Date().getFullYear()} Last Mile Books</span>
+          <span>
+            © {new Date().getFullYear()} Last Mile Books ·{" "}
+            <a href="/privacy.html" className="hover:text-foreground" data-testid="link-privacy">
+              Privacy
+            </a>
+          </span>
           <span>Temecula · Murrieta · Menifee · Palm Springs</span>
         </div>
       </div>
