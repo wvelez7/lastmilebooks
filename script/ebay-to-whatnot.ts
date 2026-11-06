@@ -1,6 +1,8 @@
+import "dotenv/config";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { getListingPhotos } from "../server/inventory/ebayApp";
 import { parseActiveListingsReport, ReportError, type ReportListing } from "../server/inventory/ebayReport";
 
 // Turns Seller Hub's "All active listings" report into a CSV for Whatnot's
@@ -8,6 +10,9 @@ import { parseActiveListingsReport, ReportError, type ReportListing } from "../s
 // drafts, so delete old ones before importing a corrected file.
 //
 //   npx tsx script/ebay-to-whatnot.ts report.csv --shipping "12-15 oz"
+//
+// Add --photos to fill in the image links from eBay, one API call per listing.
+// Needs EBAY_CLIENT_ID and EBAY_CLIENT_SECRET in .env.
 
 // Matches the US template, including its unnamed fourth column:
 // docs.google.com/spreadsheets/d/1UNxbyQoXjpjuqYcCE_Ie94OTCEB7lXR7Yz84aynILW4
@@ -19,6 +24,7 @@ const HEADERS = [
 ];
 
 const SUBCATEGORIES = ["New & Used Books", "Rare & Vintage Books", "Graphic Novels", "Magazines"];
+const MAX_PHOTOS = 8;
 
 // eBay's book conditions, by name or numeric id, to the template's Books values.
 // Plain "Used" (3000) says nothing about wear, so it's left for a person to grade.
@@ -40,12 +46,38 @@ function csvCell(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
-function whatnotRow(listing: ReportListing, type: string, shipping: string, subcategory: string): string[] {
+// Photos for each item id. A listing that can't be looked up is reported, not
+// fatal, but bad keys would fail every listing, so those stop the run.
+async function fetchPhotos(listings: ReportListing[]): Promise<Map<string, string[]>> {
+  if (!process.env.EBAY_CLIENT_ID || !process.env.EBAY_CLIENT_SECRET) {
+    throw new ReportError("--photos needs EBAY_CLIENT_ID and EBAY_CLIENT_SECRET in .env.");
+  }
+  const photos = new Map<string, string[]>();
+  for (const listing of listings) {
+    try {
+      photos.set(listing.itemId, (await getListingPhotos(listing.itemId)).slice(0, MAX_PHOTOS));
+    } catch (e) {
+      const message = (e as Error).message;
+      if (message.startsWith("eBay token request failed")) throw new ReportError(message);
+      console.log(`  No photos for ${listing.itemId}: ${message}`);
+    }
+  }
+  return photos;
+}
+
+function whatnotRow(
+  listing: ReportListing,
+  type: string,
+  shipping: string,
+  subcategory: string,
+  photos: string[],
+): string[] {
   const condition = CONDITIONS[(listing.condition ?? "").trim().toLowerCase()] ?? "";
   const description = listing.isbn ? `${listing.title}\nISBN ${listing.isbn}` : listing.title;
   const row = [
     "Books", subcategory, listing.title, "", description, String(listing.quantity), type,
     listing.price.toFixed(2), shipping, "", "Not Hazmat", condition, "", listing.sku ?? "",
+    ...photos,
   ];
   return [...row, ...Array<string>(HEADERS.length - row.length).fill("")];
 }
@@ -58,6 +90,7 @@ async function main(): Promise<void> {
       shipping: { type: "string", default: "1 lb" },
       type: { type: "string", default: "Buy It Now" },
       subcategory: { type: "string", default: "New & Used Books" },
+      photos: { type: "boolean", default: false },
     },
   });
 
@@ -69,7 +102,10 @@ async function main(): Promise<void> {
 
   const { listings, skipped } = parseActiveListingsReport(await readFile(input, "utf8"), null);
   const inStock = listings.filter((l) => l.quantity > 0);
-  const rows = inStock.map((l) => whatnotRow(l, values.type, values.shipping, values.subcategory));
+  const photos = values.photos ? await fetchPhotos(inStock) : new Map<string, string[]>();
+  const rows = inStock.map((l) =>
+    whatnotRow(l, values.type, values.shipping, values.subcategory, photos.get(l.itemId) ?? []),
+  );
 
   const parsed = path.parse(input);
   const out = values.out ?? path.join(parsed.dir, `${parsed.name}-whatnot.csv`);
@@ -83,6 +119,10 @@ async function main(): Promise<void> {
   console.log(`Shipping profile: ${values.shipping}. Type: ${values.type}.`);
   if (listings.length > inStock.length) console.log(`Left out ${listings.length - inStock.length} sold-out listings.`);
   if (skipped) console.log(`Skipped ${skipped} report rows with no usable item number, title or price.`);
+  if (values.photos) {
+    const withPhotos = inStock.filter((l) => photos.get(l.itemId)?.length).length;
+    console.log(`Photos found for ${withPhotos} of ${inStock.length} listings.`);
+  }
   if (ungraded.length) {
     console.log(`\n${ungraded.length} need a Condition filled in (eBay's value didn't map):`);
     for (const l of ungraded) console.log(`  ${l.itemId}  ${l.condition ?? "(blank)"}  ${l.title}`);

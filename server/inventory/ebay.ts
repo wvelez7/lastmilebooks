@@ -1,5 +1,6 @@
 import { toIsbn13 } from "@shared/profit";
 import { inventoryStore } from "./store";
+import { API_HOST, appToken, tokenRequest } from "./ebayApp";
 
 // eBay: OAuth user token (authorization-code grant, refreshed automatically),
 // the Fulfillment API to read orders, and the Trading API to change listing
@@ -8,7 +9,6 @@ import { inventoryStore } from "./store";
 // Env: EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RU_NAME (from
 // developer.ebay.com → Application Keys / User Tokens).
 const AUTH_HOST = "https://auth.ebay.com";
-const API_HOST = "https://api.ebay.com";
 const SCOPES = [
   "https://api.ebay.com/oauth/api_scope",
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
@@ -35,32 +35,6 @@ export function authorizeUrl(state: string): string {
     state,
   });
   return `${AUTH_HOST}/oauth2/authorize?${qs}`;
-}
-
-function basicAuth(): string {
-  const raw = `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`;
-  return `Basic ${Buffer.from(raw).toString("base64")}`;
-}
-
-async function tokenRequest(form: Record<string, string>) {
-  const res = await fetch(`${API_HOST}/identity/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      Authorization: basicAuth(),
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams(form),
-  });
-  const json = (await res.json()) as {
-    access_token?: string;
-    expires_in?: number;
-    refresh_token?: string;
-    error_description?: string;
-  };
-  if (!res.ok || !json.access_token) {
-    throw new Error(`eBay token request failed: ${res.status} ${json.error_description ?? ""}`);
-  }
-  return json;
 }
 
 let cachedAccess: { token: string; expiresAt: number } | null = null;
@@ -290,19 +264,6 @@ interface BrowseItem {
   condition?: string;
   itemWebUrl?: string;
   image?: { imageUrl: string };
-}
-
-// Browse requires an application token, separate from the seller's user token.
-let cachedAppToken: { token: string; expiresAt: number } | null = null;
-
-async function appToken(): Promise<string> {
-  if (cachedAppToken && cachedAppToken.expiresAt - 60_000 > Date.now()) return cachedAppToken.token;
-  const json = await tokenRequest({
-    grant_type: "client_credentials",
-    scope: "https://api.ebay.com/oauth/api_scope",
-  });
-  cachedAppToken = { token: json.access_token!, expiresAt: Date.now() + (json.expires_in ?? 7200) * 1000 };
-  return cachedAppToken.token;
 }
 
 // The cheapest fixed-price US listings for a barcode, cheapest (with shipping) first.
