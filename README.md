@@ -71,6 +71,7 @@ Code lives in `server/inventory/`; the admin page is `/#/inventory` (enter `ADMI
 - Orders on both marketplaces are checked every `INVENTORY_POLL_SECONDS` (default 60). The first check starts from "now", so older orders are never replayed. Optional Whatnot webhooks (`POST /api/webhooks/whatnot`) make Whatnot sales near-instant.
 - A failed update is logged on the admin page, retried every poll, and emailed to the team inboxes once.
 - Cancelled orders are **not** relisted automatically; relist by hand.
+- To copy eBay listings to Whatnot, run `npx tsx script/ebay-to-whatnot.ts report.csv --shipping "12-15 oz"` on the "All active listings" report, then import the output from Whatnot's Inventory page. Listings arrive as drafts without photos.
 
 Setup:
 
