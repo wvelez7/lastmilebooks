@@ -241,6 +241,7 @@ export interface BatchItem {
   ebayLowest: number | null; // cheapest fixed-price eBay listing, item price only
   onEbayAlready: number; // copies already in your eBay store
   box: string; // where the book is stored
+  labelPrintedAt: string | null; // the SKU is fixed once its label is on the book
   condition: BookCondition;
   note: string;
   quantity: number;
@@ -252,6 +253,17 @@ export interface BatchItem {
   amazonResult: ListResult | null;
   ebayResult: ListResult | null;
   createdAt: string;
+}
+
+// What a scanned SKU label belongs to, for checking a book before shipping.
+export interface SkuCheck {
+  sku: string;
+  title: string;
+  box: string | null;
+  imageUrl: string | null;
+  status: "not_listed" | "listed" | "sold";
+  where: string[]; // marketplaces it's listed on
+  lastSale: { message: string; at: string } | null;
 }
 
 export interface Batch {

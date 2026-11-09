@@ -22,6 +22,7 @@ import type {
   BookCondition,
   ListingSettings,
   ListResult,
+  SkuCheck,
 } from "@shared/listing";
 import { toIsbn13 } from "@shared/profit";
 import { asc, desc, eq, sql } from "drizzle-orm";
@@ -82,6 +83,7 @@ function toItem(row: BatchItemRow): BatchItem {
     ebayLowest: row.ebayLowest,
     onEbayAlready: row.onEbayAlready,
     box: row.box,
+    labelPrintedAt: row.labelPrintedAt,
     condition: row.condition as BookCondition,
     note: row.note,
     quantity: row.quantity,
@@ -242,11 +244,13 @@ export function updateItem(id: number, patch: BatchItemPatch): BatchItem {
   if (getRow(row.batchId).status === "listing") throw new BatchError("Wait for the batch to finish listing");
   const next = { ...row, ...patch };
   if (patch.listAmazon && !row.amazon) throw new BatchError("This book isn't on Amazon");
-  // Once listed somewhere, the SKU is how the sync finds it, so it stays.
+  // Once listed somewhere, the SKU is how the sync finds it, and once its
+  // label is on the book it must match the label, so in both cases it stays.
   const listedSomewhere = parseJson<ListResult>(row.amazonResult)?.ok || parseJson<ListResult>(row.ebayResult)?.ok;
+  const keepSku = listedSomewhere || row.labelPrintedAt !== null;
   const updated = db
     .update(batchItems)
-    .set({ ...patch, sku: listedSomewhere ? row.sku : skuFor(next) })
+    .set({ ...patch, sku: keepSku ? row.sku : skuFor(next) })
     .where(eq(batchItems.id, id))
     .returning()
     .get();
@@ -262,6 +266,7 @@ export function applyPatternToUnlisted(): { updated: number; tooLong: string[] }
   const tooLong: string[] = [];
   for (const row of rows) {
     if (parseJson<ListResult>(row.amazonResult)?.ok || parseJson<ListResult>(row.ebayResult)?.ok) continue;
+    if (row.labelPrintedAt) continue; // matches the label on the book
     if (getRow(row.batchId).status === "listing") continue;
     const sku = buildSkuFor(row);
     if (sku.length > MAX_SKU_LENGTH) {
@@ -273,6 +278,39 @@ export function applyPatternToUnlisted(): { updated: number; tooLong: string[] }
     updated++;
   }
   return { updated, tooLong };
+}
+
+// Called by the page after DYMO printed the label. From then on the SKU stays
+// as printed, even if the price, condition or box changes.
+export function markLabelPrinted(id: number): BatchItem {
+  getItemRow(id);
+  const row = db
+    .update(batchItems)
+    .set({ labelPrintedAt: new Date().toISOString() })
+    .where(eq(batchItems.id, id))
+    .returning()
+    .get();
+  return toItem(row);
+}
+
+// For checking a book's label before shipping: what the SKU is, where it's
+// listed, and the latest sale recorded for it.
+export function checkSku(sku: string): SkuCheck | null {
+  const item = db.select().from(batchItems).where(eq(batchItems.sku, sku)).orderBy(desc(batchItems.id)).get();
+  const inventory = inventoryStore.getBySku(sku);
+  if (!item && !inventory) return null;
+  const sale = inventoryStore.lastSale(sku);
+  const where = [inventory?.amazonSku && "Amazon", inventory?.ebayItemId && "eBay", inventory?.whatnotVariantId && "Whatnot"]
+    .filter((w): w is string => Boolean(w));
+  return {
+    sku,
+    title: item?.title ?? inventory!.title,
+    box: item?.box || null,
+    imageUrl: parseJson<AmazonBook>(item?.amazon ?? null)?.imageUrl ?? null,
+    status: sale ? "sold" : where.length ? "listed" : "not_listed",
+    where,
+    lastSale: sale ? { message: sale.message, at: sale.createdAt } : null,
+  };
 }
 
 export function deleteItem(id: number): void {

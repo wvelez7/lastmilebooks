@@ -187,6 +187,7 @@ export const batchItems = sqliteTable("batch_items", {
   ebayLowest: real("ebay_lowest"),
   onEbayAlready: integer("on_ebay_already").notNull().default(0),
   box: text("box").notNull().default(""), // where the book is stored, for the {BOX} in its SKU
+  labelPrintedAt: text("label_printed_at"), // once set, the SKU no longer changes
   condition: text("condition").notNull(),
   note: text("note").notNull().default(""),
   quantity: integer("quantity").notNull().default(1),

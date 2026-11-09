@@ -5,7 +5,7 @@ import type { EbayListingRow } from "@shared/schema";
 import { computeAmazonProfit, computeProfit, DEFAULT_SCAN_SETTINGS, scanSettingsSchema, toIsbn13 } from "@shared/profit";
 import type { ScanSettings } from "@shared/profit";
 import { suggestedAmazonPrice } from "@shared/listing";
-import type { AmazonBook, AmazonPrice, BatchDetail, BatchItem } from "@shared/listing";
+import type { AmazonBook, AmazonPrice, BatchDetail, BatchItem, SkuCheck } from "@shared/listing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +13,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { BatchItemEditor, BatchTab, BoxField, Research, SkuSettingsForm } from "./ScanBatch";
+import {
+  BatchItemEditor,
+  BatchTab,
+  BoxField,
+  LabelPrinterSettings,
+  labelAutoPrint,
+  printItemLabel,
+  Research,
+  SkuCheckCard,
+  SkuSettingsForm,
+} from "./ScanBatch";
 import type { Api, BatchesResponse } from "./ScanBatch";
 
 // Phone page for checking books against the eBay store and Amazon's prices,
@@ -53,6 +63,7 @@ interface LookupResponse {
   amazonError: string | null;
   amazonAvailable: boolean;
   canList: { amazon: boolean; ebay: boolean };
+  skuCheck: SkuCheck | null;
 }
 
 function readStored(key: string): string | null {
@@ -317,6 +328,13 @@ function LookupResult({
     <div className="space-y-3" data-testid="section-result">
       <p className="text-xs text-muted-foreground">Barcode {lookup.code}</p>
 
+      {lookup.skuCheck && <SkuCheckCard check={lookup.skuCheck} />}
+      {!isbn13 && !lookup.skuCheck && lookup.listings.length === 0 && (
+        <p className="font-medium text-destructive" data-testid="text-sku-unknown">
+          No book with SKU {lookup.code} and it isn't an ISBN.
+        </p>
+      )}
+
       {isbn13 && (
         <Card data-testid="card-batch-item">
           <CardContent className="space-y-3 p-4">
@@ -373,7 +391,7 @@ function LookupResult({
         <ListingCard key={l.itemId} listing={l} settings={settings} />
       ))}
 
-      {lookup.listings.length === 0 && (
+      {lookup.listings.length === 0 && isbn13 && (
         <>
           <p className="font-medium" data-testid="text-not-found">
             Not in your eBay inventory.
@@ -726,6 +744,19 @@ export default function Scan() {
         setOverview((o) =>
           o ? { ...o, batches: o.batches.map((b) => (b.id === item.batchId ? { ...b, itemCount: b.itemCount + 1 } : b)) } : o,
         );
+        if (labelAutoPrint()) {
+          try {
+            const printed = await printItemLabel(item, api);
+            setAdded(printed);
+            setBatch((b) => (b ? { ...b, items: b.items.map((i) => (i.id === printed.id ? printed : i)) } : b));
+          } catch (e) {
+            toast({
+              title: "Label didn't print",
+              description: `${(e as Error).message} The book is in the batch; print its label from there.`,
+              variant: "destructive",
+            });
+          }
+        }
       } catch (e) {
         toast({ title: "Couldn't add to batch", description: (e as Error).message, variant: "destructive" });
       }
@@ -1005,6 +1036,7 @@ export default function Scan() {
         </TabsContent>
 
         <TabsContent value="settings" className="space-y-6">
+          <LabelPrinterSettings />
           {overview && (
             <SkuSettingsForm
               settings={overview.settings}

@@ -169,6 +169,8 @@ export function registerInventoryRoutes(app: Express) {
       amazonError,
       amazonAvailable: amazon.amazonConfigured() && isbn13 !== null,
       canList: { amazon: amazon.amazonListingConfigured(), ebay: ebay.ebayListingConfigured() },
+      // A scanned SKU label, when checking a book before shipping it.
+      skuCheck: isbn13 ? null : batches.checkSku(code),
     });
   });
 
@@ -246,6 +248,15 @@ export function registerInventoryRoutes(app: Express) {
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
     try {
       res.json(batches.updateItem(Number(req.params.id), parsed.data));
+    } catch (e) {
+      sendBatchError(res, e);
+    }
+  });
+
+  // The page prints labels itself (DYMO runs on the computer), then reports it.
+  app.post("/api/batch-items/:id/label-printed", requireAdmin, (req, res) => {
+    try {
+      res.json(batches.markLabelPrinted(Number(req.params.id)));
     } catch (e) {
       sendBatchError(res, e);
     }

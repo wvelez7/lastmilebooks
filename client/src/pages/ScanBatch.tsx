@@ -18,6 +18,7 @@ import type {
   BookCondition,
   ListingSettings,
   ListResult,
+  SkuCheck,
 } from "@shared/listing";
 import { computeAmazonProfit, computeProfit } from "@shared/profit";
 import type { ScanSettings } from "@shared/profit";
@@ -27,6 +28,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { DEFAULT_PRINTER, dymoConnected, dymoPrinters, previewBookLabel, printBookLabel } from "@/lib/dymo";
 
 // The Batch tab of the scanner, Accelerlist style: books scanned into a batch
 // start at Amazon's lowest used price, get checked and adjusted here, then are
@@ -53,6 +55,187 @@ function conditionLabel(value: string): string {
 function priceOrNull(draft: string): number | null {
   const n = Number(draft);
   return draft.trim() !== "" && Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+}
+
+// ---- SKU labels (DYMO) --------------------------------------------------------
+// Printing settings belong to the computer the printer is plugged into, so they
+// live in this browser, not on the server.
+
+const LABEL_AUTO_STORAGE = "lmb-label-auto";
+const LABEL_PRINTER_STORAGE = "lmb-label-printer";
+
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+export function labelAutoPrint(): boolean {
+  return readStored(LABEL_AUTO_STORAGE) === "on";
+}
+
+export function labelPrinterName(): string {
+  return readStored(LABEL_PRINTER_STORAGE) || DEFAULT_PRINTER;
+}
+
+// Prints the book's label and records it, which fixes its SKU as printed.
+export async function printItemLabel(item: BatchItem, api: Api): Promise<BatchItem> {
+  await printBookLabel({ sku: item.sku, title: item.title }, labelPrinterName());
+  return api("POST", `/api/batch-items/${item.id}/label-printed`);
+}
+
+export function LabelPrinterSettings() {
+  const { toast } = useToast();
+  const [auto, setAuto] = useState(labelAutoPrint);
+  const [printer, setPrinter] = useState(labelPrinterName);
+  const [status, setStatus] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const sample = { sku: "Box32-1126-32-9780140449136-01", title: "Crime and Punishment (Penguin Classics)" };
+
+  async function run(what: string, fn: () => Promise<void>) {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      toast({ title: what, description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border p-3 text-sm" data-testid="section-label-printer">
+      <div className="font-medium">SKU labels (DYMO)</div>
+      <p className="text-xs text-muted-foreground">
+        Prints on 2-1/4" x 1-1/4" labels (DYMO 30334): title, a barcode of the SKU, and the SKU. Works on the computer the
+        DYMO is plugged into, with DYMO Connect running. These settings are for this computer only.
+      </p>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={auto}
+          onChange={(e) => {
+            setAuto(e.target.checked);
+            writeStored(LABEL_AUTO_STORAGE, e.target.checked ? "on" : "off");
+          }}
+          data-testid="checkbox-label-auto"
+        />
+        Print a label for each book added to a batch
+      </label>
+      <div className="space-y-1">
+        <Label htmlFor="label-printer" className="text-xs text-muted-foreground">Printer name</Label>
+        <Input
+          id="label-printer"
+          value={printer}
+          onChange={(e) => setPrinter(e.target.value)}
+          onBlur={() => writeStored(LABEL_PRINTER_STORAGE, printer.trim() || DEFAULT_PRINTER)}
+          data-testid="input-label-printer"
+        />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() =>
+            void run("Couldn't check the printer", async () => {
+              if (!(await dymoConnected())) {
+                setStatus("DYMO Connect isn't answering on this computer.");
+                return;
+              }
+              const names = await dymoPrinters().catch(() => null);
+              setStatus(
+                names === null
+                  ? "DYMO Connect is running, but it can't see a printer. Is the DYMO on and plugged in?"
+                  : names.length
+                    ? `DYMO Connect sees: ${names.join(", ")}`
+                    : "DYMO Connect is running but sees no printers.",
+              );
+            })
+          }
+          data-testid="button-label-check"
+        >
+          Check printer
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => void run("Couldn't make a preview", async () => setPreview(await previewBookLabel(sample, labelPrinterName())))}
+          data-testid="button-label-preview"
+        >
+          Preview label
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() =>
+            void run("Test label didn't print", async () => {
+              await printBookLabel(sample, labelPrinterName());
+              toast({ title: "Test label sent to the printer" });
+            })
+          }
+          data-testid="button-label-test"
+        >
+          Print test label
+        </Button>
+      </div>
+      {status && <p className="text-xs" data-testid="text-label-status">{status}</p>}
+      {preview && <img src={preview} alt="Label preview" className="max-w-full border" data-testid="img-label-preview" />}
+    </div>
+  );
+}
+
+// Shown when a SKU label is scanned, e.g. while packing an order: which book it
+// is, where it's stored, and whether a sale was recorded for it.
+export function SkuCheckCard({ check }: { check: SkuCheck }) {
+  const sold = check.status === "sold";
+  const when = check.lastSale ? new Date(check.lastSale.at).toLocaleString() : null;
+  return (
+    <Card className={sold ? "border-green-700" : "border-amber-500"} data-testid="card-sku-check">
+      <CardContent className="space-y-2 p-4">
+        <div
+          className={`text-lg font-semibold ${sold ? "text-green-700 dark:text-green-400" : "text-amber-700 dark:text-amber-400"}`}
+          data-testid="text-sku-check-status"
+        >
+          {sold ? "✓ Sold: this is the book" : check.status === "listed" ? "Not sold yet" : "Not listed yet"}
+        </div>
+        <div className="flex gap-3">
+          {check.imageUrl && <img src={check.imageUrl} alt="" className="h-16 w-12 flex-none rounded object-cover" />}
+          <div className="min-w-0 text-sm">
+            <div className="font-medium leading-snug">{check.title}</div>
+            <div className="font-mono text-xs">{check.sku}</div>
+            {check.box && <div className="text-xs">Box {check.box}</div>}
+          </div>
+        </div>
+        {check.lastSale && (
+          <p className="text-sm">
+            {check.lastSale.message.replace(/ on (\w+)/, (_m, p: string) => ` on ${p.charAt(0).toUpperCase()}${p.slice(1)}`)} ·{" "}
+            {when}
+          </p>
+        )}
+        {!sold && (
+          <p className="text-sm text-muted-foreground">
+            {check.where.length ? `Listed on ${check.where.join(" and ")}, ` : ""}no sale recorded for this SKU. Check the
+            order's SKU before shipping.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 // The box new scans go into. Change it when you start filling a new box; books
@@ -208,8 +391,27 @@ export function BatchItemEditor({
 
   return (
     <div className="space-y-3">
-      <div className="text-sm">
-        SKU <span className="font-mono font-medium" data-testid={`text-sku-${item.id}`}>{item.sku}</span>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <span>
+          SKU <span className="font-mono font-medium" data-testid={`text-sku-${item.id}`}>{item.sku}</span>
+          {item.labelPrintedAt && <span className="ml-2 text-xs text-muted-foreground">label printed</span>}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={async () => {
+            try {
+              onChange(await printItemLabel(item, api));
+              toast({ title: `Label printed: ${item.sku}` });
+            } catch (e) {
+              toast({ title: "Label didn't print", description: (e as Error).message, variant: "destructive" });
+            }
+          }}
+          data-testid={`button-print-label-${item.id}`}
+        >
+          {item.labelPrintedAt ? "Reprint label" : "Print label"}
+        </Button>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
@@ -496,6 +698,7 @@ export function BatchTab({
 }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   if (!batch) {
     return (
@@ -512,6 +715,7 @@ export function BatchTab({
   const todo = batch.items.filter((i) => i.status !== "listed");
   const ready = todo.filter((i) => !itemProblem(i));
   const listed = batch.items.filter((i) => i.status === "listed").length;
+  const unlabeled = batch.items.filter((i) => !i.labelPrintedAt && i.status !== "listed");
   const amazonTotal = ready.reduce((s, i) => s + (i.listAmazon && i.amazonPrice ? i.amazonPrice * i.quantity : 0), 0);
   const profitTotal = ready.reduce(
     (s, i) => s + (i.listAmazon && i.amazonPrice ? computeAmazonProfit(i.amazonPrice, settings).profit * i.quantity : 0),
@@ -595,6 +799,32 @@ export function BatchTab({
       {!listing && ready.length > 0 && (
         <Button className="w-full" disabled={busy} onClick={() => void listAll()} data-testid="button-list-batch">
           List {ready.length} book{ready.length === 1 ? "" : "s"}
+        </Button>
+      )}
+      {unlabeled.length > 0 && (
+        <Button
+          variant="outline"
+          className="w-full"
+          disabled={printing}
+          onClick={async () => {
+            setPrinting(true);
+            let current = batch;
+            try {
+              for (const item of unlabeled) {
+                const printed = await printItemLabel(item, api);
+                current = { ...current, items: current.items.map((i) => (i.id === printed.id ? printed : i)) };
+                onBatchChange(current);
+              }
+              toast({ title: `Printed ${unlabeled.length} label${unlabeled.length === 1 ? "" : "s"}` });
+            } catch (e) {
+              toast({ title: "Labels stopped printing", description: (e as Error).message, variant: "destructive" });
+            } finally {
+              setPrinting(false);
+            }
+          }}
+          data-testid="button-print-missing-labels"
+        >
+          {printing ? "Printing labels…" : `Print ${unlabeled.length} missing label${unlabeled.length === 1 ? "" : "s"}`}
         </Button>
       )}
       {!listing && todo.length > ready.length && (

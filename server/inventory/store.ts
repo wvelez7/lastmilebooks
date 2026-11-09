@@ -6,7 +6,7 @@ import {
 } from "@shared/schema";
 import type { InventoryItem, SyncEvent, UpsertInventoryItem } from "@shared/schema";
 import { db } from "../storage";
-import { asc, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, like, sql } from "drizzle-orm";
 
 export const inventoryStore = {
   listItems(): InventoryItem[] {
@@ -106,6 +106,16 @@ export const inventoryStore = {
     const prefix = level === "error" ? console.error : console.log;
     prefix(`[inventory] ${level}: ${message}${sku ? ` (${sku})` : ""}`);
     db.insert(syncEvents).values({ level, message, sku: sku ?? null }).run();
+  },
+
+  // The latest sale recorded for a SKU, from the event log.
+  lastSale(sku: string): SyncEvent | undefined {
+    return db
+      .select()
+      .from(syncEvents)
+      .where(and(eq(syncEvents.sku, sku), like(syncEvents.message, "Sold %")))
+      .orderBy(desc(syncEvents.id))
+      .get();
   },
 
   listEvents(limit = 200): SyncEvent[] {
