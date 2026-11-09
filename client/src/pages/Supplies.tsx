@@ -67,6 +67,7 @@ export default function Supplies() {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [takesTurns, setTakesTurns] = useState(false);
 
   const api = useCallback(
     async (method: string, url: string, body?: unknown) => {
@@ -127,6 +128,7 @@ export default function Supplies() {
 
   function closeForm() {
     setForm(emptyForm);
+    setTakesTurns(false);
     setEditingId(null);
     setFormOpen(false);
   }
@@ -142,6 +144,7 @@ export default function Supplies() {
       productUrl: s.productUrl ?? "",
       unitCost: s.unitCost === null ? "" : String(s.unitCost),
     });
+    setTakesTurns(s.takesTurns);
     setEditingId(s.id);
     setFormOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -156,6 +159,7 @@ export default function Supplies() {
       reorderAt: count(form.reorderAt),
       reorderQuantity: count(form.reorderQuantity),
       usedPerOrder: count(form.usedPerOrder),
+      takesTurns,
       supplier: form.supplier.trim() || null,
       productUrl: form.productUrl.trim() || null,
       unitCost: count(form.unitCost),
@@ -270,6 +274,20 @@ export default function Supplies() {
                 {field("reorderAt", "Reorder when down to", wholeNumber)}
                 {field("reorderQuantity", "How many to reorder", { ...wholeNumber, min: 1 })}
                 {field("usedPerOrder", "Used per order (0 to count by hand)", wholeNumber)}
+                <label className="flex items-start gap-2 text-sm sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={takesTurns}
+                    onChange={(e) => setTakesTurns(e.target.checked)}
+                  />
+                  <span>
+                    Takes turns with other supplies that have this ticked
+                    <span className="block text-muted-foreground">
+                      For things you use one or the other of, like two mailer sizes: each order uses the next one in turn.
+                    </span>
+                  </span>
+                </label>
                 {field("supplier", "Supplier (optional)")}
                 {field("unitCost", "Cost each (optional)", { type: "number", min: 0, step: "0.01", inputMode: "decimal" })}
                 <div className="sm:col-span-2">
@@ -349,7 +367,11 @@ export default function Supplies() {
                   </div>
                   <div className="text-sm text-muted-foreground">
                     Reorders at {s.reorderAt}
-                    {s.usedPerOrder > 0 ? ` · ${s.usedPerOrder} per order` : " · counted by hand"}
+                    {s.usedPerOrder === 0
+                      ? " · counted by hand"
+                      : s.takesTurns
+                        ? ` · ${s.usedPerOrder} per order, taking turns`
+                        : ` · ${s.usedPerOrder} per order`}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-1">

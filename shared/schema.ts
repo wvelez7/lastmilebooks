@@ -116,6 +116,8 @@ export type EbayListingRow = typeof ebayListings.$inferSelect;
 
 // Mailers, tape, labels and so on (admin page at /#/supplies). A row with
 // used_per_order above 0 goes down by itself with each marketplace order.
+// Rows with takes_turns set share orders instead: each order uses the next one,
+// for things used interchangeably like two mailer sizes.
 export const supplies = sqliteTable("supplies", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
@@ -123,6 +125,7 @@ export const supplies = sqliteTable("supplies", {
   reorderAt: integer("reorder_at").notNull().default(0), // low at or below this
   reorderQuantity: integer("reorder_quantity").notNull().default(1),
   usedPerOrder: integer("used_per_order").notNull().default(0),
+  takesTurns: integer("takes_turns", { mode: "boolean" }).notNull().default(false),
   supplier: text("supplier"),
   productUrl: text("product_url"),
   unitCost: real("unit_cost"),
@@ -143,6 +146,7 @@ export const upsertSupplySchema = z.object({
   reorderAt: z.number({ message: "Enter when to reorder" }).int().min(0),
   reorderQuantity: z.number({ message: "Enter how many to reorder" }).int().min(1, "Reorder at least 1"),
   usedPerOrder: z.number({ message: "Enter how many each order uses" }).int().min(0),
+  takesTurns: z.boolean().default(false),
   supplier: z.string().trim().min(1).nullable(),
   productUrl: z
     .string()

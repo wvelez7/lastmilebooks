@@ -80,6 +80,7 @@ sqlite.exec(`
     reorder_at INTEGER NOT NULL DEFAULT 0,
     reorder_quantity INTEGER NOT NULL DEFAULT 1,
     used_per_order INTEGER NOT NULL DEFAULT 0,
+    takes_turns INTEGER NOT NULL DEFAULT 0,
     supplier TEXT,
     product_url TEXT,
     unit_cost REAL,
@@ -130,6 +131,7 @@ function addColumn(table: string, column: string, type: string) {
   if (!columns.some((c) => c.name === column)) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 addColumn("inventory_items", "amazon_sku", "TEXT");
+addColumn("supplies", "takes_turns", "INTEGER NOT NULL DEFAULT 0");
 
 export const db = drizzle(sqlite);
 

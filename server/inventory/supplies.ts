@@ -112,12 +112,25 @@ export async function alertLowSupplies(): Promise<void> {
   }
 }
 
+const TURN_KEY = "supplies_last_turn"; // id of the supply the last order used
+
 // `orderKey` is "<platform>:<order id>". Claimed once per order, not per line,
 // because several books in one order share a package.
 export async function useSuppliesForOrder(orderKey: string): Promise<void> {
   if (!inventoryStore.claimSale(`supplies:${orderKey}`)) return;
-  for (const supply of listSupplies()) {
-    if (supply.usedPerOrder > 0) adjustSupply(supply.id, -supply.usedPerOrder);
+  const used = listSupplies().filter((s) => s.usedPerOrder > 0);
+  for (const supply of used) {
+    if (!supply.takesTurns) adjustSupply(supply.id, -supply.usedPerOrder);
+  }
+  // Supplies that take turns: this order uses the one after the last one used.
+  // No await between reading and saving the turn, so overlapping orders can't
+  // both pick the same one.
+  const turns = used.filter((s) => s.takesTurns).sort((a, b) => a.id - b.id);
+  if (turns.length > 0) {
+    const last = Number(inventoryStore.getState(TURN_KEY) ?? 0);
+    const next = turns.find((s) => s.id > last) ?? turns[0];
+    adjustSupply(next.id, -next.usedPerOrder);
+    inventoryStore.setState(TURN_KEY, String(next.id));
   }
   await alertLowSupplies();
 }
