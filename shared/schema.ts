@@ -160,6 +160,46 @@ export function isLowOnSupply(s: Pick<Supply, "quantity" | "reorderAt">): boolea
   return s.quantity <= s.reorderAt;
 }
 
+// Books scanned for listing (/#/scan, Batch tab). JSON columns hold the
+// shapes in shared/listing.ts.
+export const listingBatches = sqliteTable("listing_batches", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  status: text("status").notNull().default("open"), // "open" | "listing" | "done"
+  defaults: text("defaults").notNull(), // BatchDefaults
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const batchItems = sqliteTable("batch_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  batchId: integer("batch_id").notNull(),
+  seq: integer("seq").notNull(), // the {SEQ} in the SKU
+  sku: text("sku").notNull(),
+  isbn13: text("isbn13").notNull(),
+  title: text("title").notNull(),
+  amazon: text("amazon"), // AmazonBook snapshot, null if not on Amazon
+  ebayLowest: real("ebay_lowest"),
+  onEbayAlready: integer("on_ebay_already").notNull().default(0),
+  condition: text("condition").notNull(),
+  note: text("note").notNull().default(""),
+  quantity: integer("quantity").notNull().default(1),
+  amazonPrice: real("amazon_price"),
+  ebayPrice: real("ebay_price"),
+  listAmazon: integer("list_amazon", { mode: "boolean" }).notNull(),
+  listEbay: integer("list_ebay", { mode: "boolean" }).notNull(),
+  status: text("status").notNull().default("pending"), // "pending" | "listed" | "failed"
+  amazonResult: text("amazon_result"), // ListResult
+  ebayResult: text("ebay_result"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export type BatchItemRow = typeof batchItems.$inferSelect;
+export type ListingBatchRow = typeof listingBatches.$inferSelect;
+
 export const PLATFORMS = ["whatnot", "ebay", "amazon"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 

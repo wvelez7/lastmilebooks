@@ -89,6 +89,38 @@ sqlite.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS listing_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    defaults TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS batch_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    sku TEXT NOT NULL,
+    isbn13 TEXT NOT NULL,
+    title TEXT NOT NULL,
+    amazon TEXT,
+    ebay_lowest REAL,
+    on_ebay_already INTEGER NOT NULL DEFAULT 0,
+    condition TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    quantity INTEGER NOT NULL DEFAULT 1,
+    amazon_price REAL,
+    ebay_price REAL,
+    list_amazon INTEGER NOT NULL,
+    list_ebay INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    amazon_result TEXT,
+    ebay_result TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS batch_items_batch ON batch_items (batch_id);
 `);
 
 // Columns added after a table was first created, which CREATE TABLE IF NOT

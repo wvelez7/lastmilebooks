@@ -3,9 +3,18 @@ import type { Express, NextFunction, Request, Response } from "express";
 import crypto from "node:crypto";
 import { upsertInventoryItemSchema, upsertSupplySchema } from "@shared/schema";
 import { scanSettingsSchema, toIsbn13 } from "@shared/profit";
-import { bookCondition, listBookSchema, newSku } from "@shared/listing";
-import type { ListBookResponse } from "@shared/listing";
+import { z } from "zod";
+import {
+  batchDefaultsSchema,
+  batchItemPatchSchema,
+  DEFAULT_BATCH_DEFAULTS,
+  listingSettingsSchema,
+  MAX_SKU_LENGTH,
+} from "@shared/listing";
+import type { AmazonBook } from "@shared/listing";
 import { inventoryStore } from "./store";
+import * as batches from "./batches";
+import { BatchError } from "./batches";
 import * as supplies from "./supplies";
 import * as whatnot from "./whatnot";
 import * as ebay from "./ebay";
@@ -162,88 +171,119 @@ export function registerInventoryRoutes(app: Express) {
     });
   });
 
-  // List a scanned book on Amazon, eBay or both under one new SKU, and add it
-  // to inventory so a sale on one takes it down on the other.
-  app.post("/api/scan/list", requireAdmin, async (req, res) => {
-    const parsed = listBookSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "validation_failed" });
-    }
-    const book = parsed.data;
-    const isbn13 = toIsbn13(book.code);
-    if (!isbn13) return res.status(400).json({ error: "Only books with an ISBN can be listed from here" });
-    if (book.amazonPrice !== null && !amazon.amazonListingConfigured()) {
-      return res.status(400).json({ error: "Amazon listing isn't set up yet (AMAZON_SELLER_ID)" });
-    }
-    if (book.ebayPrice !== null && !ebay.ebayListingConfigured()) {
-      return res.status(400).json({ error: "eBay listing isn't set up yet (connect eBay and set EBAY_POSTAL_CODE)" });
-    }
+  // ---- Listing batches (Batch tab on /#/scan) ----
+  const sendBatchError = (res: Response, e: unknown) => {
+    if (e instanceof BatchError) return res.status(400).json({ error: e.message });
+    throw e;
+  };
 
-    const condition = bookCondition(book.condition);
-    const sku = newSku(isbn13);
-    inventoryStore.upsert({ sku, title: book.title, quantity: book.quantity });
-    const result: ListBookResponse = { sku, amazon: null, ebay: null };
+  app.get("/api/batches", requireAdmin, (_req, res) => {
+    res.json({
+      batches: batches.listBatches(),
+      settings: batches.getListingSettings(),
+      canList: { amazon: amazon.amazonListingConfigured(), ebay: ebay.ebayListingConfigured() },
+    });
+  });
 
-    if (book.ebayPrice !== null) {
-      try {
-        const { itemId, shippingPolicy } = await ebay.createListing({
-          sku,
-          isbn13,
-          title: book.title,
-          conditionId: condition.ebayId,
-          note: book.note,
-          price: book.ebayPrice,
-          quantity: book.quantity,
-        });
-        const url = `https://www.ebay.com/itm/${itemId}`;
-        inventoryStore.upsert({ sku, title: book.title, quantity: book.quantity, ebayItemId: itemId });
-        listings.addListing({
-          itemId,
-          sku,
-          title: book.title,
-          isbn: isbn13,
-          price: book.ebayPrice,
-          quantity: book.quantity,
-          condition: condition.label,
-          url,
-        });
-        inventoryStore.log("info", `Listed on eBay at $${book.ebayPrice.toFixed(2)} (item ${itemId})`, sku);
-        result.ebay = { ok: true, message: `Listed at $${book.ebayPrice.toFixed(2)}, shipping policy "${shippingPolicy}"`, url };
-      } catch (e) {
-        inventoryStore.log("error", `eBay listing failed: ${(e as Error).message}`, sku);
-        result.ebay = { ok: false, message: (e as Error).message };
-      }
-    }
+  app.post("/api/batches", requireAdmin, (req, res) => {
+    const parsed = batchDefaultsSchema.safeParse(req.body?.defaults ?? DEFAULT_BATCH_DEFAULTS);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    res.json(batches.createBatch(parsed.data));
+  });
 
-    if (book.amazonPrice !== null) {
-      try {
-        await amazon.createOffer({
-          sku,
-          asin: book.asin!,
-          conditionType: condition.amazon,
-          note: book.note,
-          price: book.amazonPrice,
-          quantity: book.quantity,
-        });
-        inventoryStore.upsert({ sku, title: book.title, quantity: book.quantity, amazonSku: sku });
-        inventoryStore.log("info", `Listed on Amazon at $${book.amazonPrice.toFixed(2)}`, sku);
-        result.amazon = {
-          ok: true,
-          message: `Listed at $${book.amazonPrice.toFixed(2)}. Live on Amazon within about 15 minutes.`,
-          url: `https://www.amazon.com/dp/${book.asin}`,
-        };
-      } catch (e) {
-        inventoryStore.log("error", `Amazon listing failed: ${(e as Error).message}`, sku);
-        result.amazon = { ok: false, message: (e as Error).message };
-      }
+  app.get("/api/batches/:id", requireAdmin, (req, res) => {
+    try {
+      res.json(batches.getBatch(Number(req.params.id)));
+    } catch (e) {
+      sendBatchError(res, e);
     }
+  });
 
-    // Nothing was listed, so there's nothing to keep in sync.
-    if (!result.amazon?.ok && !result.ebay?.ok) {
-      const item = inventoryStore.getBySku(sku);
-      if (item) inventoryStore.deleteItem(item.id);
+  app.put("/api/batches/:id", requireAdmin, (req, res) => {
+    const parsed = z
+      .object({ name: z.string().trim().min(1).max(80).optional(), defaults: batchDefaultsSchema.optional() })
+      .safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    try {
+      res.json(batches.updateBatch(Number(req.params.id), parsed.data));
+    } catch (e) {
+      sendBatchError(res, e);
     }
-    res.json(result);
+  });
+
+  app.delete("/api/batches/:id", requireAdmin, (req, res) => {
+    try {
+      batches.deleteBatch(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (e) {
+      sendBatchError(res, e);
+    }
+  });
+
+  // The page sends what its lookup found, so the book isn't looked up twice.
+  const scanInfoSchema = z.object({
+    code: z.string().trim().min(1),
+    amazon: z.custom<AmazonBook | null>((v) => v === null || (typeof v === "object" && typeof (v as AmazonBook).asin === "string")),
+    ebayLowest: z.number().nullable(),
+    onEbayAlready: z.number().int().min(0),
+    title: z.string().nullable(),
+  });
+
+  app.post("/api/batches/:id/items", requireAdmin, (req, res) => {
+    const parsed = scanInfoSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const { code, ...info } = parsed.data;
+    try {
+      res.json(batches.addItem(Number(req.params.id), code, info, listings.getScanSettings()));
+    } catch (e) {
+      sendBatchError(res, e);
+    }
+  });
+
+  app.put("/api/batch-items/:id", requireAdmin, (req, res) => {
+    const parsed = batchItemPatchSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    try {
+      res.json(batches.updateItem(Number(req.params.id), parsed.data));
+    } catch (e) {
+      sendBatchError(res, e);
+    }
+  });
+
+  app.delete("/api/batch-items/:id", requireAdmin, (req, res) => {
+    try {
+      batches.deleteItem(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (e) {
+      sendBatchError(res, e);
+    }
+  });
+
+  app.post("/api/batches/:id/list", requireAdmin, (req, res) => {
+    try {
+      res.json(batches.startListing(Number(req.params.id)));
+    } catch (e) {
+      sendBatchError(res, e);
+    }
+  });
+
+  app.put("/api/listing-settings", requireAdmin, (req, res) => {
+    const parsed = listingSettingsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    // The longest values each token can take must still fit Amazon's limit.
+    const longest = parsed.data.skuTemplate
+      .replace(/\{SEQ\}/g, "999999")
+      .replace(/\{DATE\}/g, "261231")
+      .replace(/\{COND\}/g, "LN")
+      .replace(/\{PRICE\}/g, "99999")
+      .replace(/\{ISBN\}/g, "9780000000000")
+      .replace(/\{ASIN\}/g, "B000000000")
+      .replace(/\{BATCH\}/g, "9999");
+    if (longest.length > MAX_SKU_LENGTH) {
+      return res.status(400).json({ error: `That pattern can make SKUs over Amazon's ${MAX_SKU_LENGTH} characters` });
+    }
+    batches.saveListingSettings(parsed.data);
+    res.json(parsed.data);
   });
 
   app.put("/api/scan/settings", requireAdmin, (req, res) => {

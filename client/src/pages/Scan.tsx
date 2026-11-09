@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "wouter";
 import type { EbayListingRow } from "@shared/schema";
-import { computeAmazonProfit, computeProfit, DEFAULT_SCAN_SETTINGS, scanSettingsSchema } from "@shared/profit";
+import { computeAmazonProfit, computeProfit, DEFAULT_SCAN_SETTINGS, scanSettingsSchema, toIsbn13 } from "@shared/profit";
 import type { ScanSettings } from "@shared/profit";
-import { BOOK_CONDITIONS, listBookSchema } from "@shared/listing";
-import type { BookCondition, ListBookResponse, ListResult } from "@shared/listing";
+import { suggestedAmazonPrice } from "@shared/listing";
+import type { AmazonBook, AmazonPrice, BatchDetail, BatchItem } from "@shared/listing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,14 +13,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { BatchItemEditor, BatchTab, Research, SkuSettingsForm } from "./ScanBatch";
+import type { Api, BatchesResponse } from "./ScanBatch";
 
-// Phone page for checking a book against the eBay store and Amazon's prices,
-// and listing it on either or both.
+// Phone page for checking books against the eBay store and Amazon's prices,
+// and listing them in batches (Batch tab), the way Accelerlist does.
 // Not linked from the site; open /#/scan and enter the ADMIN_KEY. Remembered on
 // the device (unlike /#/inventory) because it's opened many times a day from
-// the home screen.
+// the home screen. Works with a USB or Bluetooth scanner too.
 
 const KEY_STORAGE = "lmb-scan-key";
+const BATCH_STORAGE = "lmb-scan-batch";
+const AUTO_ADD_STORAGE = "lmb-scan-auto-add";
 const RESCAN_MS = 3000; // ignore the same barcode while it's still in frame
 const MAX_ROWS = 100;
 
@@ -51,26 +55,20 @@ interface LookupResponse {
   canList: { amazon: boolean; ebay: boolean };
 }
 
-interface AmazonPrice {
-  price: number;
-  shipping: number;
+function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
-interface AmazonBook {
-  asin: string;
-  title: string;
-  imageUrl: string | null;
-  salesRank: number | null;
-  lowestUsed: AmazonPrice | null; // sellers who ship it themselves
-  lowestUsedFba: AmazonPrice | null;
-  lowestNew: AmazonPrice | null;
-  buyBoxUsed: AmazonPrice | null;
-  usedOffers: number;
-  newOffers: number;
-  restriction: string | null;
+function writeStored(key: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {}
 }
-
-type Api = (method: string, url: string, body?: unknown) => Promise<any>;
 
 function readKey(): string {
   try {
@@ -187,28 +185,9 @@ function landed(p: AmazonPrice | null): string {
   return p ? money(p.price + p.shipping) : "—";
 }
 
-// Starts at the price that matches the cheapest used copy someone ships
-// themselves (counting shipping), which is what buyers compare.
-function suggestedAmazonPrice(book: AmazonBook, settings: ScanSettings): number | null {
-  const match = book.lowestUsed ?? book.buyBoxUsed ?? book.lowestUsedFba;
-  if (!match) return null;
-  return Math.max(0.01, Math.round((match.price + match.shipping - settings.amazonShippingCredit) * 100) / 100);
-}
-
-// The price box here is also the Amazon price used when listing.
-function AmazonCard({
-  book,
-  settings,
-  priceDraft,
-  setPriceDraft,
-}: {
-  book: AmazonBook;
-  settings: ScanSettings;
-  priceDraft: string;
-  setPriceDraft: (value: string) => void;
-}) {
-  const price = Number(priceDraft);
-  const p = priceDraft.trim() !== "" && price > 0 ? computeAmazonProfit(price, settings) : null;
+function AmazonCard({ book, settings }: { book: AmazonBook; settings: ScanSettings }) {
+  const suggested = suggestedAmazonPrice(book, settings);
+  const p = suggested === null ? null : computeAmazonProfit(suggested, settings);
 
   return (
     <Card data-testid="card-amazon">
@@ -245,27 +224,23 @@ function AmazonCard({
         <p className="text-xs text-muted-foreground">
           Lowest prices including shipping. {book.usedOffers} used and {book.newOffers} new offers.
         </p>
-        <div className="grid grid-cols-2 items-end gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="amazon-price" className="text-xs text-muted-foreground">Your Amazon price</Label>
-            <Input
-              id="amazon-price"
-              inputMode="decimal"
-              value={priceDraft}
-              onChange={(e) => setPriceDraft(e.target.value)}
-              data-testid="input-amazon-price"
-            />
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground">Profit if sold</div>
-            <div
-              className={`text-2xl font-semibold tabular-nums ${p && p.profit < 0 ? "text-destructive" : "text-green-700 dark:text-green-400"}`}
-              data-testid="text-amazon-profit"
-            >
-              {p ? money(p.profit) : "—"}
+        {p && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-muted-foreground">Matching lowest used</div>
+              <div className="text-2xl font-semibold tabular-nums" data-testid="text-amazon-suggested">{money(p.price)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Profit if sold</div>
+              <div
+                className={`text-2xl font-semibold tabular-nums ${p.profit < 0 ? "text-destructive" : "text-green-700 dark:text-green-400"}`}
+                data-testid="text-amazon-profit"
+              >
+                {money(p.profit)}
+              </div>
             </div>
           </div>
-        </div>
+        )}
         {p && (
           <details className="text-sm">
             <summary className="cursor-pointer text-muted-foreground">How this adds up</summary>
@@ -279,14 +254,6 @@ function AmazonCard({
             </div>
           </details>
         )}
-        <a
-          href={`https://www.amazon.com/dp/${book.asin}`}
-          target="_blank"
-          rel="noreferrer"
-          className="block text-sm underline"
-        >
-          View on Amazon
-        </a>
       </CardContent>
     </Card>
   );
@@ -305,264 +272,102 @@ function typicalShipping(listings: EbayListingRow[]): number | null {
   return best;
 }
 
-function priceOrNull(draft: string): number | null {
-  const n = Number(draft);
-  return draft.trim() !== "" && Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function ResultLine({ where, result }: { where: string; result: ListResult }) {
-  return (
-    <p className={`text-sm ${result.ok ? "" : "text-destructive"}`} data-testid={`text-listed-${where.toLowerCase()}`}>
-      <span className="font-medium">{where}: </span>
-      {result.ok ? "✓ " : "Not listed. "}
-      {result.message}{" "}
-      {result.url && (
-        <a href={result.url} target="_blank" rel="noreferrer" className="underline">
-          View
-        </a>
-      )}
-    </p>
-  );
-}
-
-// List the scanned book on Amazon, eBay or both. The Amazon price comes from
-// the Amazon card above.
-function ListPanel({
-  lookup,
-  settings,
-  amazonPrice,
-  ebayShipping,
-  api,
-}: {
-  lookup: LookupResponse;
-  settings: ScanSettings;
-  amazonPrice: string;
-  ebayShipping: number | null;
-  api: Api;
-}) {
-  const { toast } = useToast();
-  const book = lookup.amazon;
-  const ownListing = lookup.listings[0];
-  const shipping = ownListing ? ownListing.shipping : ebayShipping;
-  const amazonPossible = lookup.canList.amazon && book !== null;
-  const ebayPossible = lookup.canList.ebay;
-  const defaultEbayPrice = ownListing?.price ?? lookup.market[0]?.price ?? priceOrNull(amazonPrice);
-
-  const [title, setTitle] = useState(book?.title || ownListing?.title || "");
-  const [condition, setCondition] = useState<BookCondition>("good");
-  const [note, setNote] = useState("");
-  const [quantity, setQuantity] = useState("1");
-  const [onAmazon, setOnAmazon] = useState(amazonPossible && !book?.restriction);
-  const [onEbay, setOnEbay] = useState(ebayPossible);
-  const [ebayPrice, setEbayPrice] = useState(defaultEbayPrice ? defaultEbayPrice.toFixed(2) : "");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<ListBookResponse | null>(null);
-
-  if (!amazonPossible && !ebayPossible) {
-    if (lookup.canList.amazon || lookup.canList.ebay) return null; // set up, just nowhere to list this book
-    return (
-      <p className="text-xs text-muted-foreground" data-testid="text-listing-off">
-        Listing from here needs AMAZON_SELLER_ID (Amazon) or EBAY_POSTAL_CODE (eBay) set on the server.
-      </p>
-    );
-  }
-
-  const ebayNumber = priceOrNull(ebayPrice);
-  const request = {
+// What a scan found, in the form the batch keeps.
+function scanInfo(lookup: LookupResponse) {
+  return {
     code: lookup.code,
-    title,
-    asin: book?.asin ?? null,
-    condition,
-    note,
-    quantity: Number(quantity),
-    amazonPrice: onAmazon ? priceOrNull(amazonPrice) : null,
-    ebayPrice: onEbay ? ebayNumber : null,
+    amazon: lookup.amazon,
+    ebayLowest: lookup.market[0]?.price ?? lookup.listings[0]?.price ?? null,
+    onEbayAlready: lookup.listings.reduce((n, l) => n + l.quantity, 0),
+    title: lookup.listings[0]?.title ?? null,
   };
-  const check = listBookSchema.safeParse(request);
-  const problem =
-    (onAmazon && request.amazonPrice === null && "Enter an Amazon price above") ||
-    (onEbay && request.ebayPrice === null && "Enter an eBay price") ||
-    (!check.success && check.error.issues[0]?.message) ||
-    null;
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (problem) return;
-    setBusy(true);
-    try {
-      const res: ListBookResponse = await api("POST", "/api/scan/list", request);
-      setResult(res);
-      const listed = [res.amazon?.ok && "Amazon", res.ebay?.ok && "eBay"].filter(Boolean).join(" and ");
-      toast(
-        listed
-          ? { title: `Listed on ${listed}`, description: `SKU ${res.sku}` }
-          : { title: "Not listed", description: "See the details below.", variant: "destructive" },
-      );
-    } catch (err) {
-      toast({ title: "Listing failed", description: (err as Error).message, variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (result) {
-    return (
-      <Card data-testid="card-list-result">
-        <CardContent className="space-y-2 p-4">
-          <div className="font-medium">Write SKU {result.sku} on the book</div>
-          {result.amazon && <ResultLine where="Amazon" result={result.amazon} />}
-          {result.ebay && <ResultLine where="eBay" result={result.ebay} />}
-          <Button variant="outline" className="w-full" onClick={() => setResult(null)} data-testid="button-list-again">
-            List another copy
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const ebayProfit = ebayNumber === null ? null : computeProfit(ebayNumber, shipping, settings).profit;
-
-  return (
-    <Card data-testid="card-list">
-      <CardContent className="p-4">
-        <form className="space-y-3" onSubmit={submit}>
-          <div className="font-medium">List this book</div>
-          <div className="space-y-1">
-            <Label htmlFor="list-title">Title</Label>
-            <Input id="list-title" value={title} onChange={(e) => setTitle(e.target.value)} data-testid="input-list-title" />
-          </div>
-          <div className="grid grid-cols-[1fr_5rem] gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="list-condition">Condition</Label>
-              <select
-                id="list-condition"
-                value={condition}
-                onChange={(e) => setCondition(e.target.value as BookCondition)}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-base md:text-sm"
-                data-testid="select-condition"
-              >
-                {BOOK_CONDITIONS.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="list-qty">Qty</Label>
-              <Input
-                id="list-qty"
-                inputMode="numeric"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                data-testid="input-list-qty"
-              />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="list-note">Condition note</Label>
-            <textarea
-              id="list-note"
-              rows={2}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. Light shelf wear, clean pages, no markings."
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm"
-              data-testid="input-list-note"
-            />
-          </div>
-
-          <label className={`flex items-center gap-2 text-sm ${amazonPossible ? "" : "text-muted-foreground"}`}>
-            <input
-              type="checkbox"
-              checked={onAmazon}
-              disabled={!amazonPossible}
-              onChange={(e) => setOnAmazon(e.target.checked)}
-              data-testid="checkbox-amazon"
-            />
-            Amazon at {priceOrNull(amazonPrice) === null ? "the price above" : money(priceOrNull(amazonPrice)!)}
-            {!book && " (not on Amazon)"}
-          </label>
-
-          <div className="space-y-2">
-            <label className={`flex items-center gap-2 text-sm ${ebayPossible ? "" : "text-muted-foreground"}`}>
-              <input
-                type="checkbox"
-                checked={onEbay}
-                disabled={!ebayPossible}
-                onChange={(e) => setOnEbay(e.target.checked)}
-                data-testid="checkbox-ebay"
-              />
-              eBay{!ebayPossible && " (not set up)"}
-            </label>
-            {onEbay && (
-              <div className="grid grid-cols-2 items-end gap-3 pl-6">
-                <div className="space-y-1">
-                  <Label htmlFor="list-ebay-price" className="text-xs text-muted-foreground">eBay price</Label>
-                  <Input
-                    id="list-ebay-price"
-                    inputMode="decimal"
-                    value={ebayPrice}
-                    onChange={(e) => setEbayPrice(e.target.value)}
-                    data-testid="input-ebay-price"
-                  />
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">
-                    {shipping === null
-                      ? "Profit if buyer pays postage"
-                      : `Profit with ${shipping === 0 ? "free" : money(shipping)} shipping`}
-                  </div>
-                  <div
-                    className={`text-lg font-semibold tabular-nums ${ebayProfit !== null && ebayProfit < 0 ? "text-destructive" : "text-green-700 dark:text-green-400"}`}
-                    data-testid="text-ebay-list-profit"
-                  >
-                    {ebayProfit === null ? "—" : money(ebayProfit)}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {problem && (onAmazon || onEbay) && <p className="text-xs text-muted-foreground">{problem}</p>}
-          <Button type="submit" className="w-full" disabled={busy || Boolean(problem)} data-testid="button-list">
-            {busy ? "Listing…" : "List"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
-  );
 }
 
-// One scanned book: the Amazon card, your eBay listings or other sellers'
-// prices, and the listing form. Keyed by scan so its inputs start fresh.
+// One scanned book: its place in the batch, the Amazon card, and your eBay
+// listings or other sellers' prices.
 function LookupResult({
   lookup,
+  added,
+  batch,
   settings,
   ebayShipping,
+  canList,
   api,
+  onAdd,
+  onItemChange,
+  onItemDelete,
+  onNewBatch,
 }: {
   lookup: LookupResponse;
+  added: BatchItem | null;
+  batch: BatchDetail | null;
   settings: ScanSettings;
   ebayShipping: number | null;
+  canList: { amazon: boolean; ebay: boolean };
   api: Api;
+  onAdd: () => Promise<void>;
+  onItemChange: (item: BatchItem) => void;
+  onItemDelete: (id: number) => void;
+  onNewBatch: () => Promise<void>;
 }) {
-  const suggested = lookup.amazon ? suggestedAmazonPrice(lookup.amazon, settings) : null;
-  const [amazonPrice, setAmazonPrice] = useState(suggested === null ? "" : suggested.toFixed(2));
+  const isbn13 = toIsbn13(lookup.code);
+  const [adding, setAdding] = useState(false);
 
   return (
     <div className="space-y-3" data-testid="section-result">
       <p className="text-xs text-muted-foreground">Barcode {lookup.code}</p>
 
-      {lookup.amazon && (
-        <AmazonCard book={lookup.amazon} settings={settings} priceDraft={amazonPrice} setPriceDraft={setAmazonPrice} />
+      {isbn13 && (
+        <Card data-testid="card-batch-item">
+          <CardContent className="space-y-3 p-4">
+            {added ? (
+              <>
+                <div className="font-medium" data-testid="text-added">
+                  Added to {batch?.name ?? "batch"}
+                </div>
+                <BatchItemEditor
+                  item={added}
+                  settings={settings}
+                  ebayShipping={ebayShipping}
+                  canList={canList}
+                  api={api}
+                  onChange={onItemChange}
+                  onDelete={onItemDelete}
+                />
+              </>
+            ) : batch && batch.status !== "listing" ? (
+              <Button
+                className="w-full"
+                disabled={adding}
+                onClick={async () => {
+                  setAdding(true);
+                  try {
+                    await onAdd();
+                  } finally {
+                    setAdding(false);
+                  }
+                }}
+                data-testid="button-add-to-batch"
+              >
+                {adding ? "Adding…" : `Add to ${batch.name}`}
+              </Button>
+            ) : (
+              <Button className="w-full" variant="outline" onClick={() => void onNewBatch()} data-testid="button-start-batch">
+                Start a batch to list books
+              </Button>
+            )}
+          </CardContent>
+        </Card>
       )}
+
+      {lookup.amazon && <AmazonCard book={lookup.amazon} settings={settings} />}
       {lookup.amazonAvailable && !lookup.amazon && !lookup.amazonError && (
         <p className="text-sm text-muted-foreground" data-testid="text-amazon-missing">Not found on Amazon.</p>
       )}
       {lookup.amazonError && (
         <p className="text-sm text-destructive" data-testid="text-amazon-error">{lookup.amazonError}</p>
       )}
+      {isbn13 && !added && <Research isbn13={isbn13} book={lookup.amazon} />}
 
       {lookup.listings.map((l) => (
         <ListingCard key={l.itemId} listing={l} settings={settings} />
@@ -596,11 +401,10 @@ function LookupResult({
           {lookup.marketError && <p className="text-sm text-destructive">Couldn't check eBay prices just now.</p>}
         </>
       )}
-
-      <ListPanel lookup={lookup} settings={settings} amazonPrice={amazonPrice} ebayShipping={ebayShipping} api={api} />
     </div>
   );
 }
+
 
 function CameraScanner({ onCode }: { onCode: (code: string) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -804,7 +608,16 @@ export default function Scan() {
   const [scanCount, setScanCount] = useState(0);
   const [looking, setLooking] = useState(false);
   const [filter, setFilter] = useState("");
+  const [tab, setTab] = useState("scan");
+  const [overview, setOverview] = useState<BatchesResponse | null>(null);
+  const [batch, setBatch] = useState<BatchDetail | null>(null);
+  const [added, setAdded] = useState<BatchItem | null>(null);
+  const [autoAdd, setAutoAdd] = useState(() => readStored(AUTO_ADD_STORAGE) !== "off");
   const lastScan = useRef({ code: "", at: 0 });
+  const batchRef = useRef<BatchDetail | null>(null);
+  batchRef.current = batch;
+  const autoAddRef = useRef(autoAdd);
+  autoAddRef.current = autoAdd;
 
   const api = useCallback(
     async (method: string, url: string, body?: unknown) => {
@@ -846,6 +659,90 @@ export default function Scan() {
     return () => clearInterval(t);
   }, [refreshing, load]);
 
+  // ---- Batches ----
+
+  const openBatch = useCallback(
+    async (id: number | null) => {
+      writeStored(BATCH_STORAGE, id === null ? null : String(id));
+      setBatch(id === null ? null : await api("GET", `/api/batches/${id}`));
+    },
+    [api],
+  );
+
+  // Reopens the batch this device last used, else the newest unfinished one.
+  const loadBatches = useCallback(async () => {
+    if (!adminKey) return;
+    try {
+      const res: BatchesResponse = await api("GET", "/api/batches");
+      setOverview(res);
+      const stored = Number(readStored(BATCH_STORAGE));
+      const pick = res.batches.find((b) => b.id === stored) ?? res.batches.find((b) => b.status !== "done") ?? null;
+      await openBatch(pick?.id ?? null);
+    } catch (e) {
+      toast({ title: "Couldn't load batches", description: (e as Error).message, variant: "destructive" });
+    }
+  }, [adminKey, api, openBatch, toast]);
+
+  useEffect(() => {
+    void loadBatches();
+  }, [loadBatches]);
+
+  // Listing runs on the server; watch it work through the batch.
+  const batchListing = batch?.status === "listing";
+  const batchId = batch?.id;
+  useEffect(() => {
+    if (!batchListing || batchId === undefined) return;
+    const t = setInterval(async () => {
+      try {
+        const next: BatchDetail = await api("GET", `/api/batches/${batchId}`);
+        setBatch(next);
+        if (next.status !== "listing") void loadBatches();
+      } catch {}
+    }, 2000);
+    return () => clearInterval(t);
+  }, [batchListing, batchId, api, loadBatches]);
+
+  const newBatch = useCallback(async () => {
+    try {
+      // Keeps the current batch's condition, note and marketplaces.
+      const created = await api("POST", "/api/batches", { defaults: batchRef.current?.defaults });
+      setOverview((o) => (o ? { ...o, batches: [created, ...o.batches] } : o));
+      await openBatch(created.id);
+      setAdded(null);
+      toast({ title: `Started ${created.name}` });
+    } catch (e) {
+      toast({ title: "Couldn't start a batch", description: (e as Error).message, variant: "destructive" });
+    }
+  }, [api, openBatch, toast]);
+
+  const addToBatch = useCallback(
+    async (found: LookupResponse) => {
+      const target = batchRef.current;
+      if (!target) return;
+      try {
+        const item: BatchItem = await api("POST", `/api/batches/${target.id}/items`, scanInfo(found));
+        setAdded(item);
+        setBatch((b) => (b && b.id === item.batchId ? { ...b, items: [...b.items, item], itemCount: b.itemCount + 1 } : b));
+        setOverview((o) =>
+          o ? { ...o, batches: o.batches.map((b) => (b.id === item.batchId ? { ...b, itemCount: b.itemCount + 1 } : b)) } : o,
+        );
+      } catch (e) {
+        toast({ title: "Couldn't add to batch", description: (e as Error).message, variant: "destructive" });
+      }
+    },
+    [api, toast],
+  );
+
+  const changeItem = useCallback((item: BatchItem) => {
+    setBatch((b) => (b ? { ...b, items: b.items.map((i) => (i.id === item.id ? item : i)) } : b));
+    setAdded((a) => (a?.id === item.id ? item : a));
+  }, []);
+
+  const removeItem = useCallback((id: number) => {
+    setBatch((b) => (b ? { ...b, items: b.items.filter((i) => i.id !== id), itemCount: b.itemCount - 1 } : b));
+    setAdded((a) => (a?.id === id ? null : a));
+  }, []);
+
   const scan = useCallback(
     async (raw: string) => {
       const code = raw.trim();
@@ -855,16 +752,20 @@ export default function Scan() {
       lastScan.current = { code, at: now };
       navigator.vibrate?.(60);
       setLooking(true);
+      setAdded(null);
       try {
-        setLookup(await api("GET", `/api/scan/lookup/${encodeURIComponent(code)}`));
+        const found: LookupResponse = await api("GET", `/api/scan/lookup/${encodeURIComponent(code)}`);
+        setLookup(found);
         setScanCount((n) => n + 1);
+        const target = batchRef.current;
+        if (autoAddRef.current && target && target.status !== "listing" && toIsbn13(code)) await addToBatch(found);
       } catch (e) {
         toast({ title: "Lookup failed", description: (e as Error).message, variant: "destructive" });
       } finally {
         setLooking(false);
       }
     },
-    [api, toast],
+    [api, toast, addToBatch],
   );
 
   if (!adminKey) {
@@ -902,6 +803,8 @@ export default function Scan() {
   }
 
   const settings = data?.settings ?? DEFAULT_SCAN_SETTINGS;
+  const ebayShipping = typicalShipping(data?.listings ?? []);
+  const canList = overview?.canList ?? { amazon: false, ebay: false };
   const status = data?.status;
   const needle = filter.trim().toLowerCase();
   const matching = (data?.listings ?? []).filter((l) =>
@@ -909,7 +812,7 @@ export default function Scan() {
   );
 
   return (
-    <main className="mx-auto min-h-screen max-w-md space-y-4 bg-background px-4 py-4">
+    <main className="mx-auto min-h-screen max-w-md space-y-4 bg-background px-4 py-4 md:max-w-2xl">
       <h1 className="text-xl font-semibold">Book scanner</h1>
 
       {status && !status.connected && (
@@ -921,14 +824,41 @@ export default function Scan() {
         </p>
       )}
 
-      <Tabs defaultValue="scan">
-        <TabsList className="grid w-full grid-cols-3">
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="scan">Scan</TabsTrigger>
-          <TabsTrigger value="inventory" data-testid="tab-inventory">Inventory</TabsTrigger>
-          <TabsTrigger value="settings" data-testid="tab-settings">Costs</TabsTrigger>
+          <TabsTrigger value="batch" data-testid="tab-batch">
+            Batch{batch ? ` (${batch.items.filter((i) => i.status !== "listed").length})` : ""}
+          </TabsTrigger>
+          <TabsTrigger value="inventory" data-testid="tab-inventory">eBay</TabsTrigger>
+          <TabsTrigger value="settings" data-testid="tab-settings">Settings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="scan" className="space-y-4">
+          <div className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm" data-testid="text-scan-target">
+            {batch ? (
+              <button type="button" className="min-w-0 truncate text-left underline" onClick={() => setTab("batch")}>
+                {batch.name}: {batch.items.length} books
+              </button>
+            ) : (
+              <Button size="sm" variant="outline" onClick={() => void newBatch()} data-testid="button-scan-new-batch">
+                Start a batch
+              </Button>
+            )}
+            <label className="flex flex-none items-center gap-2">
+              <input
+                type="checkbox"
+                checked={autoAdd}
+                onChange={(e) => {
+                  setAutoAdd(e.target.checked);
+                  writeStored(AUTO_ADD_STORAGE, e.target.checked ? "on" : "off");
+                }}
+                data-testid="checkbox-auto-add"
+              />
+              Add every scan
+            </label>
+          </div>
+
           <CameraScanner onCode={(c) => void scan(c)} />
 
           {/* USB and Bluetooth scanners type the code and press Enter here. */}
@@ -959,9 +889,34 @@ export default function Scan() {
             <LookupResult
               key={scanCount}
               lookup={lookup}
+              added={added}
+              batch={batch}
               settings={settings}
-              ebayShipping={typicalShipping(data?.listings ?? [])}
+              ebayShipping={ebayShipping}
+              canList={canList}
               api={api}
+              onAdd={() => addToBatch(lookup)}
+              onItemChange={changeItem}
+              onItemDelete={removeItem}
+              onNewBatch={newBatch}
+            />
+          )}
+        </TabsContent>
+
+        <TabsContent value="batch">
+          {overview && (
+            <BatchTab
+              overview={overview}
+              batch={batch}
+              settings={settings}
+              ebayShipping={ebayShipping}
+              api={api}
+              onSelect={(id) => void openBatch(id)}
+              onNewBatch={newBatch}
+              onBatchChange={(next) => {
+                setBatch(next);
+                setAdded((a) => (a ? (next.items.find((i) => i.id === a.id) ?? null) : a));
+              }}
             />
           )}
         </TabsContent>
@@ -1046,7 +1001,21 @@ export default function Scan() {
           )}
         </TabsContent>
 
-        <TabsContent value="settings">
+        <TabsContent value="settings" className="space-y-6">
+          {overview && (
+            <SkuSettingsForm
+              settings={overview.settings}
+              onSave={async (next) => {
+                try {
+                  const saved = await api("PUT", "/api/listing-settings", next);
+                  setOverview((o) => (o ? { ...o, settings: saved } : o));
+                  toast({ title: "SKU pattern saved" });
+                } catch (e) {
+                  toast({ title: "Couldn't save", description: (e as Error).message, variant: "destructive" });
+                }
+              }}
+            />
+          )}
           <SettingsForm
             settings={settings}
             onSave={async (next) => {

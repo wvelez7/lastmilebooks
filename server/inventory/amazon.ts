@@ -6,6 +6,8 @@
 // Env: AMAZON_LWA_CLIENT_ID, AMAZON_LWA_CLIENT_SECRET, AMAZON_REFRESH_TOKEN
 // (Seller Central → Apps and Services → Develop Apps, a private app that you
 // authorize for your own account), optional AMAZON_MARKETPLACE_ID (default US).
+import type { AmazonBook, AmazonOffer, AmazonPrice } from "@shared/listing";
+
 const TOKEN_URL = "https://api.amazon.com/auth/o2/token";
 const API_HOST = "https://sellingpartnerapi-na.amazon.com";
 const US_MARKETPLACE = "ATVPDKIKX0DER";
@@ -79,24 +81,7 @@ export async function listShippableOrdersSince(since: Date): Promise<AmazonOrder
 // Needs the "Product Listing" (catalog) and "Pricing" roles on the app, and a
 // refresh token issued after those roles were added.
 
-export interface AmazonPrice {
-  price: number; // item price
-  shipping: number; // what the buyer pays for shipping
-}
-
-export interface AmazonBook {
-  asin: string;
-  title: string;
-  imageUrl: string | null;
-  salesRank: number | null; // in Books; lower sells faster
-  lowestUsed: AmazonPrice | null; // among sellers who ship it themselves
-  lowestUsedFba: AmazonPrice | null;
-  lowestNew: AmazonPrice | null;
-  buyBoxUsed: AmazonPrice | null;
-  usedOffers: number;
-  newOffers: number;
-  restriction: string | null; // why you can't list it used, if Amazon says so
-}
+export type { AmazonBook, AmazonPrice };
 
 function marketplaceId(): string {
   return process.env.AMAZON_MARKETPLACE_ID || US_MARKETPLACE;
@@ -159,6 +144,37 @@ interface OffersSummary {
   NumberOfOffers?: { condition: string; OfferCount: number }[];
 }
 
+interface Offer {
+  SubCondition?: string; // "very_good", "good", ...
+  ListingPrice?: Money;
+  Shipping?: Money;
+  IsFulfilledByAmazon?: boolean;
+}
+
+interface OffersPayload {
+  Summary?: OffersSummary;
+  Offers?: Offer[];
+}
+
+const OFFERS_SHOWN = 10;
+
+// Exported for testing with a saved response.
+export function listOffers(offers: Offer[]): AmazonOffer[] {
+  return offers
+    .flatMap((o) =>
+      o.ListingPrice
+        ? [{
+            price: o.ListingPrice.Amount,
+            shipping: o.Shipping?.Amount ?? 0,
+            condition: (o.SubCondition ?? "used").toLowerCase(),
+            fba: Boolean(o.IsFulfilledByAmazon),
+          }]
+        : [],
+    )
+    .sort((a, b) => a.price + a.shipping - (b.price + b.shipping))
+    .slice(0, OFFERS_SHOWN);
+}
+
 function toPrice(e: PriceEntry | undefined): AmazonPrice | null {
   if (!e?.ListingPrice) return null;
   return { price: e.ListingPrice.Amount, shipping: e.Shipping?.Amount ?? 0 };
@@ -191,14 +207,14 @@ export function summarizeOffers(summary: OffersSummary) {
 const OFFERS_SPACING_MS = 2100;
 let offersQueue: Promise<unknown> = Promise.resolve();
 
-function getOffers(asin: string): Promise<OffersSummary> {
+function getOffers(asin: string): Promise<OffersPayload> {
   const run = offersQueue.then(async () => {
     const qs = new URLSearchParams({ MarketplaceId: marketplaceId(), ItemCondition: "Used" });
-    const page = await spGet<{ payload?: { Summary?: OffersSummary } }>(
+    const page = await spGet<{ payload?: OffersPayload }>(
       `/products/pricing/v0/items/${encodeURIComponent(asin)}/offers?${qs}`,
       "price check",
     );
-    return page.payload?.Summary ?? {};
+    return page.payload ?? {};
   });
   // The next call waits; this one returns as soon as Amazon answers.
   offersQueue = run.catch(() => {}).then(() => new Promise((r) => setTimeout(r, OFFERS_SPACING_MS)));
@@ -217,7 +233,8 @@ export async function lookupBook(isbn13: string): Promise<AmazonBook | null> {
     title: item.summaries?.[0]?.itemName ?? "",
     imageUrl: [...images].sort((a, b) => (a.height ?? 0) - (b.height ?? 0))[0]?.link ?? null,
     salesRank: rank?.displayGroupRanks?.[0]?.rank ?? rank?.classificationRanks?.[0]?.rank ?? null,
-    ...summarizeOffers(offers),
+    ...summarizeOffers(offers.Summary ?? {}),
+    offers: listOffers(offers.Offers ?? []),
     restriction,
   };
 }

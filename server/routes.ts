@@ -7,6 +7,7 @@ import { sendPickupRequestEmail } from "./email";
 import { registerInventoryRoutes } from "./inventory/routes";
 import { startInventorySync } from "./inventory/sync";
 import { startListingRefresh } from "./inventory/listings";
+import { recoverInterruptedBatches } from "./inventory/batches";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -55,6 +56,7 @@ export async function registerRoutes(
   registerInventoryRoutes(app);
   startInventorySync();
   startListingRefresh();
+  recoverInterruptedBatches();
 
   return httpServer;
 }
