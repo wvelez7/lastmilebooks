@@ -4,6 +4,8 @@ import { Link } from "wouter";
 import type { EbayListingRow } from "@shared/schema";
 import { computeAmazonProfit, computeProfit, DEFAULT_SCAN_SETTINGS, scanSettingsSchema } from "@shared/profit";
 import type { ScanSettings } from "@shared/profit";
+import { BOOK_CONDITIONS, listBookSchema } from "@shared/listing";
+import type { BookCondition, ListBookResponse, ListResult } from "@shared/listing";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 
-// Phone page for checking a book against the eBay store and Amazon's prices.
+// Phone page for checking a book against the eBay store and Amazon's prices,
+// and listing it on either or both.
 // Not linked from the site; open /#/scan and enter the ADMIN_KEY. Remembered on
 // the device (unlike /#/inventory) because it's opened many times a day from
 // the home screen.
@@ -45,6 +48,7 @@ interface LookupResponse {
   amazon: AmazonBook | null;
   amazonError: string | null;
   amazonAvailable: boolean;
+  canList: { amazon: boolean; ebay: boolean };
 }
 
 interface AmazonPrice {
@@ -63,7 +67,10 @@ interface AmazonBook {
   buyBoxUsed: AmazonPrice | null;
   usedOffers: number;
   newOffers: number;
+  restriction: string | null;
 }
+
+type Api = (method: string, url: string, body?: unknown) => Promise<any>;
 
 function readKey(): string {
   try {
@@ -188,9 +195,18 @@ function suggestedAmazonPrice(book: AmazonBook, settings: ScanSettings): number 
   return Math.max(0.01, Math.round((match.price + match.shipping - settings.amazonShippingCredit) * 100) / 100);
 }
 
-function AmazonCard({ book, settings }: { book: AmazonBook; settings: ScanSettings }) {
-  const suggested = suggestedAmazonPrice(book, settings);
-  const [priceDraft, setPriceDraft] = useState(suggested === null ? "" : suggested.toFixed(2));
+// The price box here is also the Amazon price used when listing.
+function AmazonCard({
+  book,
+  settings,
+  priceDraft,
+  setPriceDraft,
+}: {
+  book: AmazonBook;
+  settings: ScanSettings;
+  priceDraft: string;
+  setPriceDraft: (value: string) => void;
+}) {
   const price = Number(priceDraft);
   const p = priceDraft.trim() !== "" && price > 0 ? computeAmazonProfit(price, settings) : null;
 
@@ -207,6 +223,11 @@ function AmazonCard({ book, settings }: { book: AmazonBook; settings: ScanSettin
             </div>
           </div>
         </div>
+        {book.restriction && (
+          <p className="rounded-md border border-destructive/40 p-2 text-sm text-destructive" data-testid="text-amazon-restricted">
+            Restricted for you on Amazon: {book.restriction}
+          </p>
+        )}
         <div className="grid grid-cols-3 gap-2 text-sm">
           <div>
             <div className="text-xs text-muted-foreground">Used, seller ships</div>
@@ -226,7 +247,7 @@ function AmazonCard({ book, settings }: { book: AmazonBook; settings: ScanSettin
         </p>
         <div className="grid grid-cols-2 items-end gap-3">
           <div className="space-y-1">
-            <Label htmlFor="amazon-price" className="text-xs text-muted-foreground">Your price</Label>
+            <Label htmlFor="amazon-price" className="text-xs text-muted-foreground">Your Amazon price</Label>
             <Input
               id="amazon-price"
               inputMode="decimal"
@@ -268,6 +289,316 @@ function AmazonCard({ book, settings }: { book: AmazonBook; settings: ScanSettin
         </a>
       </CardContent>
     </Card>
+  );
+}
+
+// A new eBay listing gets the account's default shipping policy, so its
+// profit uses what the store's listings most often charge (null = calculated).
+function typicalShipping(listings: EbayListingRow[]): number | null {
+  const counts = new Map<number | null, number>();
+  for (const l of listings) counts.set(l.shipping, (counts.get(l.shipping) ?? 0) + 1);
+  let best: number | null = null;
+  let bestCount = 0;
+  counts.forEach((n, shipping) => {
+    if (n > bestCount) [best, bestCount] = [shipping, n];
+  });
+  return best;
+}
+
+function priceOrNull(draft: string): number | null {
+  const n = Number(draft);
+  return draft.trim() !== "" && Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function ResultLine({ where, result }: { where: string; result: ListResult }) {
+  return (
+    <p className={`text-sm ${result.ok ? "" : "text-destructive"}`} data-testid={`text-listed-${where.toLowerCase()}`}>
+      <span className="font-medium">{where}: </span>
+      {result.ok ? "✓ " : "Not listed. "}
+      {result.message}{" "}
+      {result.url && (
+        <a href={result.url} target="_blank" rel="noreferrer" className="underline">
+          View
+        </a>
+      )}
+    </p>
+  );
+}
+
+// List the scanned book on Amazon, eBay or both. The Amazon price comes from
+// the Amazon card above.
+function ListPanel({
+  lookup,
+  settings,
+  amazonPrice,
+  ebayShipping,
+  api,
+}: {
+  lookup: LookupResponse;
+  settings: ScanSettings;
+  amazonPrice: string;
+  ebayShipping: number | null;
+  api: Api;
+}) {
+  const { toast } = useToast();
+  const book = lookup.amazon;
+  const ownListing = lookup.listings[0];
+  const shipping = ownListing ? ownListing.shipping : ebayShipping;
+  const amazonPossible = lookup.canList.amazon && book !== null;
+  const ebayPossible = lookup.canList.ebay;
+  const defaultEbayPrice = ownListing?.price ?? lookup.market[0]?.price ?? priceOrNull(amazonPrice);
+
+  const [title, setTitle] = useState(book?.title || ownListing?.title || "");
+  const [condition, setCondition] = useState<BookCondition>("good");
+  const [note, setNote] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [onAmazon, setOnAmazon] = useState(amazonPossible && !book?.restriction);
+  const [onEbay, setOnEbay] = useState(ebayPossible);
+  const [ebayPrice, setEbayPrice] = useState(defaultEbayPrice ? defaultEbayPrice.toFixed(2) : "");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ListBookResponse | null>(null);
+
+  if (!amazonPossible && !ebayPossible) {
+    if (lookup.canList.amazon || lookup.canList.ebay) return null; // set up, just nowhere to list this book
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="text-listing-off">
+        Listing from here needs AMAZON_SELLER_ID (Amazon) or EBAY_POSTAL_CODE (eBay) set on the server.
+      </p>
+    );
+  }
+
+  const ebayNumber = priceOrNull(ebayPrice);
+  const request = {
+    code: lookup.code,
+    title,
+    asin: book?.asin ?? null,
+    condition,
+    note,
+    quantity: Number(quantity),
+    amazonPrice: onAmazon ? priceOrNull(amazonPrice) : null,
+    ebayPrice: onEbay ? ebayNumber : null,
+  };
+  const check = listBookSchema.safeParse(request);
+  const problem =
+    (onAmazon && request.amazonPrice === null && "Enter an Amazon price above") ||
+    (onEbay && request.ebayPrice === null && "Enter an eBay price") ||
+    (!check.success && check.error.issues[0]?.message) ||
+    null;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (problem) return;
+    setBusy(true);
+    try {
+      const res: ListBookResponse = await api("POST", "/api/scan/list", request);
+      setResult(res);
+      const listed = [res.amazon?.ok && "Amazon", res.ebay?.ok && "eBay"].filter(Boolean).join(" and ");
+      toast(
+        listed
+          ? { title: `Listed on ${listed}`, description: `SKU ${res.sku}` }
+          : { title: "Not listed", description: "See the details below.", variant: "destructive" },
+      );
+    } catch (err) {
+      toast({ title: "Listing failed", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (result) {
+    return (
+      <Card data-testid="card-list-result">
+        <CardContent className="space-y-2 p-4">
+          <div className="font-medium">Write SKU {result.sku} on the book</div>
+          {result.amazon && <ResultLine where="Amazon" result={result.amazon} />}
+          {result.ebay && <ResultLine where="eBay" result={result.ebay} />}
+          <Button variant="outline" className="w-full" onClick={() => setResult(null)} data-testid="button-list-again">
+            List another copy
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const ebayProfit = ebayNumber === null ? null : computeProfit(ebayNumber, shipping, settings).profit;
+
+  return (
+    <Card data-testid="card-list">
+      <CardContent className="p-4">
+        <form className="space-y-3" onSubmit={submit}>
+          <div className="font-medium">List this book</div>
+          <div className="space-y-1">
+            <Label htmlFor="list-title">Title</Label>
+            <Input id="list-title" value={title} onChange={(e) => setTitle(e.target.value)} data-testid="input-list-title" />
+          </div>
+          <div className="grid grid-cols-[1fr_5rem] gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="list-condition">Condition</Label>
+              <select
+                id="list-condition"
+                value={condition}
+                onChange={(e) => setCondition(e.target.value as BookCondition)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-base md:text-sm"
+                data-testid="select-condition"
+              >
+                {BOOK_CONDITIONS.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="list-qty">Qty</Label>
+              <Input
+                id="list-qty"
+                inputMode="numeric"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                data-testid="input-list-qty"
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="list-note">Condition note</Label>
+            <textarea
+              id="list-note"
+              rows={2}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. Light shelf wear, clean pages, no markings."
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm"
+              data-testid="input-list-note"
+            />
+          </div>
+
+          <label className={`flex items-center gap-2 text-sm ${amazonPossible ? "" : "text-muted-foreground"}`}>
+            <input
+              type="checkbox"
+              checked={onAmazon}
+              disabled={!amazonPossible}
+              onChange={(e) => setOnAmazon(e.target.checked)}
+              data-testid="checkbox-amazon"
+            />
+            Amazon at {priceOrNull(amazonPrice) === null ? "the price above" : money(priceOrNull(amazonPrice)!)}
+            {!book && " (not on Amazon)"}
+          </label>
+
+          <div className="space-y-2">
+            <label className={`flex items-center gap-2 text-sm ${ebayPossible ? "" : "text-muted-foreground"}`}>
+              <input
+                type="checkbox"
+                checked={onEbay}
+                disabled={!ebayPossible}
+                onChange={(e) => setOnEbay(e.target.checked)}
+                data-testid="checkbox-ebay"
+              />
+              eBay{!ebayPossible && " (not set up)"}
+            </label>
+            {onEbay && (
+              <div className="grid grid-cols-2 items-end gap-3 pl-6">
+                <div className="space-y-1">
+                  <Label htmlFor="list-ebay-price" className="text-xs text-muted-foreground">eBay price</Label>
+                  <Input
+                    id="list-ebay-price"
+                    inputMode="decimal"
+                    value={ebayPrice}
+                    onChange={(e) => setEbayPrice(e.target.value)}
+                    data-testid="input-ebay-price"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">
+                    {shipping === null
+                      ? "Profit if buyer pays postage"
+                      : `Profit with ${shipping === 0 ? "free" : money(shipping)} shipping`}
+                  </div>
+                  <div
+                    className={`text-lg font-semibold tabular-nums ${ebayProfit !== null && ebayProfit < 0 ? "text-destructive" : "text-green-700 dark:text-green-400"}`}
+                    data-testid="text-ebay-list-profit"
+                  >
+                    {ebayProfit === null ? "—" : money(ebayProfit)}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {problem && (onAmazon || onEbay) && <p className="text-xs text-muted-foreground">{problem}</p>}
+          <Button type="submit" className="w-full" disabled={busy || Boolean(problem)} data-testid="button-list">
+            {busy ? "Listing…" : "List"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+// One scanned book: the Amazon card, your eBay listings or other sellers'
+// prices, and the listing form. Keyed by scan so its inputs start fresh.
+function LookupResult({
+  lookup,
+  settings,
+  ebayShipping,
+  api,
+}: {
+  lookup: LookupResponse;
+  settings: ScanSettings;
+  ebayShipping: number | null;
+  api: Api;
+}) {
+  const suggested = lookup.amazon ? suggestedAmazonPrice(lookup.amazon, settings) : null;
+  const [amazonPrice, setAmazonPrice] = useState(suggested === null ? "" : suggested.toFixed(2));
+
+  return (
+    <div className="space-y-3" data-testid="section-result">
+      <p className="text-xs text-muted-foreground">Barcode {lookup.code}</p>
+
+      {lookup.amazon && (
+        <AmazonCard book={lookup.amazon} settings={settings} priceDraft={amazonPrice} setPriceDraft={setAmazonPrice} />
+      )}
+      {lookup.amazonAvailable && !lookup.amazon && !lookup.amazonError && (
+        <p className="text-sm text-muted-foreground" data-testid="text-amazon-missing">Not found on Amazon.</p>
+      )}
+      {lookup.amazonError && (
+        <p className="text-sm text-destructive" data-testid="text-amazon-error">{lookup.amazonError}</p>
+      )}
+
+      {lookup.listings.map((l) => (
+        <ListingCard key={l.itemId} listing={l} settings={settings} />
+      ))}
+
+      {lookup.listings.length === 0 && (
+        <>
+          <p className="font-medium" data-testid="text-not-found">
+            Not in your eBay inventory.
+          </p>
+          {lookup.market.length > 0 && (
+            <p className="text-sm text-muted-foreground">Cheapest listings from other sellers:</p>
+          )}
+          {lookup.market.map((m, i) => (
+            <Card key={i}>
+              <CardContent className="space-y-3 p-4">
+                <div className="font-medium leading-snug">{m.title}</div>
+                {m.condition && <Badge variant="secondary">{m.condition}</Badge>}
+                <ProfitBreakdown price={m.price} shipping={m.shipping} settings={settings} />
+                {m.url && (
+                  <a href={m.url} target="_blank" rel="noreferrer" className="block text-sm underline">
+                    View on eBay
+                  </a>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+          {lookup.marketAvailable && lookup.market.length === 0 && !lookup.marketError && (
+            <p className="text-sm text-muted-foreground">No other fixed-price listings found either.</p>
+          )}
+          {lookup.marketError && <p className="text-sm text-destructive">Couldn't check eBay prices just now.</p>}
+        </>
+      )}
+
+      <ListPanel lookup={lookup} settings={settings} amazonPrice={amazonPrice} ebayShipping={ebayShipping} api={api} />
+    </div>
   );
 }
 
@@ -470,6 +801,7 @@ export default function Scan() {
   const [data, setData] = useState<ListingsResponse | null>(null);
   const [typed, setTyped] = useState("");
   const [lookup, setLookup] = useState<LookupResponse | null>(null);
+  const [scanCount, setScanCount] = useState(0);
   const [looking, setLooking] = useState(false);
   const [filter, setFilter] = useState("");
   const lastScan = useRef({ code: "", at: 0 });
@@ -525,6 +857,7 @@ export default function Scan() {
       setLooking(true);
       try {
         setLookup(await api("GET", `/api/scan/lookup/${encodeURIComponent(code)}`));
+        setScanCount((n) => n + 1);
       } catch (e) {
         toast({ title: "Lookup failed", description: (e as Error).message, variant: "destructive" });
       } finally {
@@ -623,52 +956,13 @@ export default function Scan() {
           {looking && <p className="text-sm text-muted-foreground">Looking it up…</p>}
 
           {lookup && !looking && (
-            <div className="space-y-3" data-testid="section-result">
-              <p className="text-xs text-muted-foreground">Barcode {lookup.code}</p>
-
-              {lookup.amazon && <AmazonCard key={lookup.code} book={lookup.amazon} settings={settings} />}
-              {lookup.amazonAvailable && !lookup.amazon && !lookup.amazonError && (
-                <p className="text-sm text-muted-foreground" data-testid="text-amazon-missing">Not found on Amazon.</p>
-              )}
-              {lookup.amazonError && (
-                <p className="text-sm text-destructive" data-testid="text-amazon-error">{lookup.amazonError}</p>
-              )}
-
-              {lookup.listings.map((l) => (
-                <ListingCard key={l.itemId} listing={l} settings={settings} />
-              ))}
-
-              {lookup.listings.length === 0 && (
-                <>
-                  <p className="font-medium" data-testid="text-not-found">
-                    Not in your eBay inventory.
-                  </p>
-                  {lookup.market.length > 0 && (
-                    <p className="text-sm text-muted-foreground">Cheapest listings from other sellers:</p>
-                  )}
-                  {lookup.market.map((m, i) => (
-                    <Card key={i}>
-                      <CardContent className="space-y-3 p-4">
-                        <div className="font-medium leading-snug">{m.title}</div>
-                        {m.condition && <Badge variant="secondary">{m.condition}</Badge>}
-                        <ProfitBreakdown price={m.price} shipping={m.shipping} settings={settings} />
-                        {m.url && (
-                          <a href={m.url} target="_blank" rel="noreferrer" className="block text-sm underline">
-                            View on eBay
-                          </a>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                  {lookup.marketAvailable && lookup.market.length === 0 && !lookup.marketError && (
-                    <p className="text-sm text-muted-foreground">No other fixed-price listings found either.</p>
-                  )}
-                  {lookup.marketError && (
-                    <p className="text-sm text-destructive">Couldn't check eBay prices just now.</p>
-                  )}
-                </>
-              )}
-            </div>
+            <LookupResult
+              key={scanCount}
+              lookup={lookup}
+              settings={settings}
+              ebayShipping={typicalShipping(data?.listings ?? [])}
+              api={api}
+            />
           )}
         </TabsContent>
 

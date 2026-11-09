@@ -1,7 +1,7 @@
 // Amazon Selling Partner API. Reads orders you ship yourself (merchant-
 // fulfilled) so they count against shipping supplies; FBA orders use none of
 // our supplies and are skipped. Also looks up a scanned book's prices and
-// sales rank. Books are not synced to Amazon.
+// sales rank, lists books, and keeps their quantity in sync.
 //
 // Env: AMAZON_LWA_CLIENT_ID, AMAZON_LWA_CLIENT_SECRET, AMAZON_REFRESH_TOKEN
 // (Seller Central → Apps and Services → Develop Apps, a private app that you
@@ -95,20 +95,32 @@ export interface AmazonBook {
   buyBoxUsed: AmazonPrice | null;
   usedOffers: number;
   newOffers: number;
+  restriction: string | null; // why you can't list it used, if Amazon says so
 }
 
 function marketplaceId(): string {
   return process.env.AMAZON_MARKETPLACE_ID || US_MARKETPLACE;
 }
 
-async function spGet<T>(path: string, what: string): Promise<T> {
-  const res = await fetch(`${API_HOST}${path}`, { headers: { "x-amz-access-token": await accessToken() } });
+async function spRequest<T>(method: string, path: string, what: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_HOST}${path}`, {
+    method,
+    headers: {
+      "x-amz-access-token": await accessToken(),
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
   if (res.status === 403) {
     throw new Error(`Amazon ${what} not allowed: add the Product Listing and Pricing roles to your app, then authorize it again`);
   }
-  if (res.status === 429) throw new Error(`Amazon ${what} is busy. Scan again in a few seconds.`);
+  if (res.status === 429) throw new Error(`Amazon ${what} is busy. Try again in a few seconds.`);
   if (!res.ok) throw new Error(`Amazon ${what} failed: ${res.status} ${(await res.text()).slice(0, 300)}`);
   return (await res.json()) as T;
+}
+
+function spGet<T>(path: string, what: string): Promise<T> {
+  return spRequest<T>("GET", path, what);
 }
 
 interface CatalogItem {
@@ -199,11 +211,138 @@ export async function lookupBook(isbn13: string): Promise<AmazonBook | null> {
   if (!item) return null;
   const images = item.images?.[0]?.images ?? [];
   const rank = item.salesRanks?.[0];
+  const [offers, restriction] = await Promise.all([getOffers(item.asin), usedRestriction(item.asin)]);
   return {
     asin: item.asin,
     title: item.summaries?.[0]?.itemName ?? "",
     imageUrl: [...images].sort((a, b) => (a.height ?? 0) - (b.height ?? 0))[0]?.link ?? null,
     salesRank: rank?.displayGroupRanks?.[0]?.rank ?? rank?.classificationRanks?.[0]?.rank ?? null,
-    ...summarizeOffers(await getOffers(item.asin)),
+    ...summarizeOffers(offers),
+    restriction,
   };
+}
+
+// --- Listing books you ship yourself ---
+// Needs AMAZON_SELLER_ID: Seller Central → Settings → Account Info → Merchant Token.
+
+export function amazonListingConfigured(): boolean {
+  return amazonConfigured() && Boolean(process.env.AMAZON_SELLER_ID);
+}
+
+function listingPath(sku: string): string {
+  const qs = new URLSearchParams({ marketplaceIds: marketplaceId() });
+  return `/listings/2021-08-01/items/${encodeURIComponent(process.env.AMAZON_SELLER_ID!)}/${encodeURIComponent(sku)}?${qs}`;
+}
+
+// Some books are gated by publisher or condition. Checked as "used, good",
+// which matches what most of our books are; null also when it can't be
+// checked, so a failed check never hides the price.
+async function usedRestriction(asin: string): Promise<string | null> {
+  if (!amazonListingConfigured()) return null;
+  const qs = new URLSearchParams({
+    asin,
+    sellerId: process.env.AMAZON_SELLER_ID!,
+    marketplaceIds: marketplaceId(),
+    conditionType: "used_good",
+  });
+  try {
+    const page = await spGet<{ restrictions?: { reasons?: { message?: string }[] }[] }>(
+      `/listings/2021-08-01/restrictions?${qs}`,
+      "restriction check",
+    );
+    const reasons = (page.restrictions ?? []).flatMap((r) => r.reasons ?? []);
+    if ((page.restrictions ?? []).length === 0) return null;
+    return reasons.map((r) => r.message).filter(Boolean).join(" ") || "Amazon doesn't let you list this book.";
+  } catch {
+    return null;
+  }
+}
+
+interface ListingIssue {
+  message: string;
+  severity: string; // "ERROR" | "WARNING" | "INFO"
+}
+
+interface ListingSubmission {
+  status: string; // "ACCEPTED" | "INVALID"
+  issues?: ListingIssue[];
+}
+
+function submissionError(what: string, result: ListingSubmission): Error | null {
+  const errors = (result.issues ?? []).filter((i) => i.severity === "ERROR");
+  if (result.status === "ACCEPTED" && errors.length === 0) return null;
+  return new Error(`Amazon ${what}: ${errors.map((i) => i.message).join(" ") || result.status}`);
+}
+
+export interface NewOffer {
+  sku: string;
+  asin: string;
+  conditionType: string; // e.g. "used_very_good"
+  note: string;
+  price: number;
+  quantity: number;
+}
+
+// An offer on the book's existing Amazon page, shipped by you with your
+// default shipping template. Amazon accepts it at once and has it live
+// within about 15 minutes.
+export async function createOffer(offer: NewOffer): Promise<void> {
+  const marketplace_id = marketplaceId();
+  const attributes: Record<string, unknown[]> = {
+    merchant_suggested_asin: [{ value: offer.asin, marketplace_id }],
+    condition_type: [{ value: offer.conditionType, marketplace_id }],
+    purchasable_offer: [
+      { currency: "USD", marketplace_id, our_price: [{ schedule: [{ value_with_tax: offer.price }] }] },
+    ],
+    fulfillment_availability: [{ fulfillment_channel_code: "DEFAULT", quantity: offer.quantity }],
+  };
+  if (offer.note) {
+    attributes.condition_note = [{ value: offer.note, language_tag: "en_US", marketplace_id }];
+  }
+  const result = await spRequest<ListingSubmission>("PUT", listingPath(offer.sku), "listing", {
+    productType: "PRODUCT",
+    requirements: "LISTING_OFFER_ONLY",
+    attributes,
+  });
+  const error = submissionError("didn't accept the listing", result);
+  if (error) throw error;
+}
+
+// At 0 the offer stays on Amazon but can't be bought.
+export async function setOfferQuantity(sku: string, quantity: number): Promise<void> {
+  const result = await spRequest<ListingSubmission>("PATCH", listingPath(sku), "quantity update", {
+    productType: "PRODUCT",
+    patches: [
+      {
+        op: "replace",
+        path: "/attributes/fulfillment_availability",
+        value: [{ fulfillment_channel_code: "DEFAULT", quantity }],
+      },
+    ],
+  });
+  const error = submissionError("didn't accept the quantity", result);
+  if (error) throw error;
+}
+
+export interface AmazonOrderItem {
+  OrderItemId: string;
+  SellerSKU?: string;
+  Title?: string;
+  QuantityOrdered: number;
+}
+
+// Which books an order is for; the order list doesn't say.
+export async function listOrderItems(orderId: string): Promise<AmazonOrderItem[]> {
+  const out: AmazonOrderItem[] = [];
+  let nextToken: string | undefined;
+  do {
+    const qs = nextToken ? `?${new URLSearchParams({ NextToken: nextToken })}` : "";
+    const page = await spGet<{ payload?: { OrderItems?: AmazonOrderItem[]; NextToken?: string } }>(
+      `/orders/v0/orders/${encodeURIComponent(orderId)}/orderItems${qs}`,
+      "order items",
+    );
+    out.push(...(page.payload?.OrderItems ?? []));
+    nextToken = page.payload?.NextToken;
+  } while (nextToken);
+  return out;
 }

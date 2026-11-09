@@ -6,7 +6,7 @@ import {
 } from "@shared/schema";
 import type { InventoryItem, SyncEvent, UpsertInventoryItem } from "@shared/schema";
 import { db } from "../storage";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq, isNotNull, sql } from "drizzle-orm";
 
 export const inventoryStore = {
   listItems(): InventoryItem[] {
@@ -33,6 +33,14 @@ export const inventoryStore = {
       .get();
   },
 
+  getByAmazonSku(sku: string): InventoryItem | undefined {
+    return db.select().from(inventoryItems).where(eq(inventoryItems.amazonSku, sku)).get();
+  },
+
+  hasAmazonListings(): boolean {
+    return Boolean(db.select({ id: inventoryItems.id }).from(inventoryItems).where(isNotNull(inventoryItems.amazonSku)).get());
+  },
+
   // Insert, or update the existing row with the same SKU. Fields left
   // undefined keep their current value.
   upsert(item: UpsertInventoryItem): InventoryItem {
@@ -48,6 +56,7 @@ export const inventoryStore = {
     const patch: Partial<InventoryItem> = { updatedAt: now, title: item.title, quantity: item.quantity };
     if (item.whatnotVariantId !== undefined) patch.whatnotVariantId = item.whatnotVariantId;
     if (item.ebayItemId !== undefined) patch.ebayItemId = item.ebayItemId;
+    if (item.amazonSku !== undefined) patch.amazonSku = item.amazonSku;
     return db
       .update(inventoryItems)
       .set(patch)

@@ -44,7 +44,7 @@ export type InsertPickupRequest = z.infer<typeof insertPickupRequestSchema>;
 export type PickupRequest = typeof pickupRequests.$inferSelect;
 
 // ---------------------------------------------------------------------------
-// Cross-marketplace inventory sync (Whatnot + eBay; Amazon later).
+// Cross-marketplace inventory sync (Whatnot, eBay and Amazon).
 // One row per book. The SKU must match the Whatnot variant SKU and the eBay
 // "Custom label" so listings can be matched automatically.
 // ---------------------------------------------------------------------------
@@ -56,6 +56,8 @@ export const inventoryItems = sqliteTable("inventory_items", {
   quantity: integer("quantity").notNull().default(1),
   whatnotVariantId: text("whatnot_variant_id"),
   ebayItemId: text("ebay_item_id"),
+  amazonSku: text("amazon_sku"), // the seller SKU of our offer on Amazon
+
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -158,7 +160,7 @@ export function isLowOnSupply(s: Pick<Supply, "quantity" | "reorderAt">): boolea
   return s.quantity <= s.reorderAt;
 }
 
-export const PLATFORMS = ["whatnot", "ebay"] as const;
+export const PLATFORMS = ["whatnot", "ebay", "amazon"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
 export const upsertInventoryItemSchema = z.object({
@@ -167,6 +169,7 @@ export const upsertInventoryItemSchema = z.object({
   quantity: z.number().int().min(0),
   whatnotVariantId: z.string().trim().min(1).nullable().optional(),
   ebayItemId: z.string().trim().regex(/^\d+$/, "eBay item IDs are numbers").nullable().optional(),
+  amazonSku: z.string().trim().min(1).max(40).nullable().optional(),
 });
 
 export type UpsertInventoryItem = z.infer<typeof upsertInventoryItemSchema>;

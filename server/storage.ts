@@ -32,6 +32,7 @@ sqlite.exec(`
     quantity INTEGER NOT NULL DEFAULT 1,
     whatnot_variant_id TEXT,
     ebay_item_id TEXT,
+    amazon_sku TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -89,6 +90,14 @@ sqlite.exec(`
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
+
+// Columns added after a table was first created, which CREATE TABLE IF NOT
+// EXISTS leaves out of existing databases.
+function addColumn(table: string, column: string, type: string) {
+  const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!columns.some((c) => c.name === column)) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+addColumn("inventory_items", "amazon_sku", "TEXT");
 
 export const db = drizzle(sqlite);
 

@@ -107,6 +107,15 @@ async function fillMissingDetails(): Promise<void> {
   if (failed > 1) inventoryStore.log("warn", `${failed} eBay listings could not be read; retrying next refresh`);
 }
 
+// A book just listed from the scanner, so scanning it again finds it before
+// the next refresh. Shipping and photo are filled in by that refresh.
+export function addListing(row: Pick<EbayListingRow, "itemId" | "sku" | "title" | "isbn" | "price" | "quantity" | "condition" | "url">): void {
+  db.insert(ebayListings)
+    .values({ ...row, updatedAt: new Date().toISOString() })
+    .onConflictDoNothing()
+    .run();
+}
+
 export function startListingRefresh(): void {
   setInterval(() => void refreshListings(), REFRESH_MS);
   setTimeout(() => void refreshListings(), 10_000);

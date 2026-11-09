@@ -1,3 +1,4 @@
+import { PLATFORMS } from "@shared/schema";
 import type { InventoryItem, Platform } from "@shared/schema";
 import { inventoryStore } from "./store";
 import * as whatnot from "./whatnot";
@@ -9,23 +10,34 @@ import { sendTeamAlert } from "../email";
 // How it works: when a book sells on one marketplace, its quantity here goes
 // down and the new quantity is pushed to every *other* marketplace it's
 // listed on (at 0 the listing comes down). Sales arrive two ways: Whatnot
-// webhooks (instant, optional) and a poll of both marketplaces' orders every
-// INVENTORY_POLL_SECONDS (default 60), which also catches anything missed.
+// webhooks (instant, optional) and a poll of each marketplace's orders every
+// INVENTORY_POLL_SECONDS (default 60; Amazon every 2 minutes at most), which
+// also catches anything missed.
 
 const OVERLAP_MS = 10 * 60 * 1000; // re-read the last 10 min of orders each poll
 const PENDING_KEY = "pending_push"; // item ids whose push failed, retried each poll
 
+const PLATFORM_NAMES: Record<Platform, string> = { whatnot: "Whatnot", ebay: "eBay", amazon: "Amazon" };
+
 function connected(platform: Platform): boolean {
-  return platform === "whatnot" ? whatnot.whatnotConfigured() : ebay.ebayConnected();
+  if (platform === "whatnot") return whatnot.whatnotConfigured();
+  if (platform === "ebay") return ebay.ebayConnected();
+  return amazon.amazonListingConfigured();
 }
 
 function listingId(item: InventoryItem, platform: Platform): string | null {
-  return platform === "whatnot" ? item.whatnotVariantId : item.ebayItemId;
+  if (platform === "whatnot") return item.whatnotVariantId;
+  if (platform === "ebay") return item.ebayItemId;
+  return item.amazonSku;
 }
 
 async function setPlatformQuantity(platform: Platform, id: string, quantity: number): Promise<string> {
   if (platform === "whatnot") {
     await whatnot.setVariantQuantity(id, quantity);
+    return "updated";
+  }
+  if (platform === "amazon") {
+    await amazon.setOfferQuantity(id, quantity);
     return "updated";
   }
   return ebay.setListingQuantity(id, quantity);
@@ -47,7 +59,7 @@ function savePending(ids: Set<number>): void {
 // `skip` (the one where the sale happened, which already updated itself).
 export async function pushQuantity(item: InventoryItem, skip?: Platform): Promise<boolean> {
   let ok = true;
-  for (const platform of ["whatnot", "ebay"] as const) {
+  for (const platform of PLATFORMS) {
     if (platform === skip) continue;
     const id = listingId(item, platform);
     if (!id || !connected(platform)) continue;
@@ -93,16 +105,17 @@ interface Sale {
   listingId?: string | null;
 }
 
-// An eBay sale can't reach a Whatnot listing that has no variant, so ask for it to
-// be pulled by hand rather than risk selling the same copy twice.
-async function warnIfOnWhatnot(title: string, sku?: string | null): Promise<void> {
+// An eBay or Amazon sale can't reach a Whatnot listing that has no variant, so
+// ask for it to be pulled by hand rather than risk selling the same copy twice.
+async function warnIfOnWhatnot(soldOn: Platform, title: string, sku?: string | null): Promise<void> {
   if (!whatnot.whatnotConfigured()) return;
+  const where = PLATFORM_NAMES[soldOn];
   try {
     if (!(await whatnot.hasProductTitled(title))) return;
-    inventoryStore.log("warn", `Sold on eBay, also on Whatnot: remove "${title}" by hand`, sku ?? undefined);
+    inventoryStore.log("warn", `Sold on ${where}, also on Whatnot: remove "${title}" by hand`, sku ?? undefined);
     await sendTeamAlert(
       `Remove from Whatnot: "${title}"`,
-      `"${title}" just sold on eBay and is also listed on Whatnot, where the sync can't update it.
+      `"${title}" just sold on ${where} and is also listed on Whatnot, where the sync can't update it.
 ` +
         `Remove it from Whatnot now so it doesn't sell twice.`,
     );
@@ -119,17 +132,20 @@ export async function recordSale(sale: Sale): Promise<void> {
     inventoryStore.log("error", `Could not update supplies: ${(e as Error).message}`),
   );
 
+  const byListing = (id: string) =>
+    sale.platform === "whatnot"
+      ? inventoryStore.getByWhatnotVariant(id)
+      : sale.platform === "ebay"
+        ? inventoryStore.getByEbayItem(id)
+        : inventoryStore.getByAmazonSku(id);
   const item =
-    (sale.listingId &&
-      (sale.platform === "whatnot"
-        ? inventoryStore.getByWhatnotVariant(sale.listingId)
-        : inventoryStore.getByEbayItem(sale.listingId))) ||
+    (sale.listingId && byListing(sale.listingId)) ||
     (sale.sku ? inventoryStore.getBySku(sale.sku.trim()) : undefined);
 
   if (!item) {
     // Normal for live-show books that were never cross-listed.
     inventoryStore.log("info", `Sold on ${sale.platform}, not cross-listed: ${sale.title}`, sale.sku);
-    if (sale.platform === "ebay") await warnIfOnWhatnot(sale.title, sale.sku);
+    if (sale.platform !== "whatnot") await warnIfOnWhatnot(sale.platform, sale.title, sale.sku);
     return;
   }
 
@@ -140,8 +156,8 @@ export async function recordSale(sale: Sale): Promise<void> {
     item.sku,
   );
   await pushQuantity(updated, sale.platform);
-  if (sale.platform === "ebay" && !updated.whatnotVariantId && updated.quantity === 0) {
-    await warnIfOnWhatnot(updated.title, updated.sku);
+  if (sale.platform !== "whatnot" && !updated.whatnotVariantId && updated.quantity === 0) {
+    await warnIfOnWhatnot(sale.platform, updated.title, updated.sku);
   }
 }
 
@@ -205,17 +221,26 @@ async function pollEbay(): Promise<void> {
 
 // ---- Amazon ----------------------------------------------------------------
 
-// Amazon only counts against shipping supplies; books aren't synced there, so
-// once a day is enough. A failed check is retried every 5 minutes instead.
+// With no books listed on Amazon from here, orders only count against
+// shipping supplies, so once a day is enough. Once any are, sales are checked
+// every 2 minutes (getOrders allows about one call a minute) so the other
+// marketplaces come down quickly. A failed check is retried every 5 minutes.
 export const AMAZON_POLL_MS = (Number(process.env.AMAZON_POLL_SECONDS) || 86_400) * 1000;
-const AMAZON_RETRY_MS = Math.min(5 * 60 * 1000, AMAZON_POLL_MS);
+const AMAZON_SALES_POLL_MS = 2 * 60 * 1000;
 let lastAmazonAttempt = 0;
+
+function amazonPollMs(): number {
+  return amazon.amazonListingConfigured() && inventoryStore.hasAmazonListings()
+    ? Math.min(AMAZON_SALES_POLL_MS, AMAZON_POLL_MS)
+    : AMAZON_POLL_MS;
+}
 
 async function pollAmazon(): Promise<void> {
   // Last success is saved, so a restart or deploy doesn't trigger an early check.
+  const interval = amazonPollMs();
   const lastSuccess = inventoryStore.getState("amazon_orders_since");
-  if (lastSuccess && Date.now() - new Date(lastSuccess).getTime() < AMAZON_POLL_MS) return;
-  if (Date.now() - lastAmazonAttempt < AMAZON_RETRY_MS) return;
+  if (lastSuccess && Date.now() - new Date(lastSuccess).getTime() < interval) return;
+  if (Date.now() - lastAmazonAttempt < Math.min(5 * 60 * 1000, interval)) return;
   lastAmazonAttempt = Date.now();
   const started = new Date();
   // Orders placed before the first check were never counted and are skipped
@@ -225,9 +250,27 @@ async function pollAmazon(): Promise<void> {
   const since = new Date(inventoryStore.getState("amazon_orders_since") ?? started.toISOString());
   try {
     const orders = await amazon.listShippableOrdersSince(new Date(since.getTime() - OVERLAP_MS));
+    const syncSales = amazon.amazonListingConfigured() && inventoryStore.hasAmazonListings();
     for (const order of orders) {
       if (new Date(order.PurchaseDate) < firstCheck) continue;
-      await useSuppliesForOrder(`amazon:${order.AmazonOrderId}`);
+      if (!syncSales) {
+        await useSuppliesForOrder(`amazon:${order.AmazonOrderId}`);
+        continue;
+      }
+      // Each order's books are read once; recordSale also counts supplies.
+      const orderKey = `amazon:order:${order.AmazonOrderId}`;
+      if (inventoryStore.hasSale(orderKey)) continue;
+      for (const line of await amazon.listOrderItems(order.AmazonOrderId)) {
+        await recordSale({
+          platform: "amazon",
+          saleKey: `amazon:${order.AmazonOrderId}:${line.OrderItemId}`,
+          quantity: line.QuantityOrdered,
+          title: line.Title ?? "(untitled)",
+          sku: line.SellerSKU,
+          listingId: line.SellerSKU,
+        });
+      }
+      inventoryStore.claimSale(orderKey);
     }
   } catch (e) {
     inventoryStore.setState("amazon_last_error", (e as Error).message);

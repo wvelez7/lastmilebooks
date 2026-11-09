@@ -3,6 +3,8 @@ import type { Express, NextFunction, Request, Response } from "express";
 import crypto from "node:crypto";
 import { upsertInventoryItemSchema, upsertSupplySchema } from "@shared/schema";
 import { scanSettingsSchema, toIsbn13 } from "@shared/profit";
+import { bookCondition, listBookSchema, newSku } from "@shared/listing";
+import type { ListBookResponse } from "@shared/listing";
 import { inventoryStore } from "./store";
 import * as supplies from "./supplies";
 import * as whatnot from "./whatnot";
@@ -156,7 +158,92 @@ export function registerInventoryRoutes(app: Express) {
       amazon: amazonBook,
       amazonError,
       amazonAvailable: amazon.amazonConfigured() && isbn13 !== null,
+      canList: { amazon: amazon.amazonListingConfigured(), ebay: ebay.ebayListingConfigured() },
     });
+  });
+
+  // List a scanned book on Amazon, eBay or both under one new SKU, and add it
+  // to inventory so a sale on one takes it down on the other.
+  app.post("/api/scan/list", requireAdmin, async (req, res) => {
+    const parsed = listBookSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "validation_failed" });
+    }
+    const book = parsed.data;
+    const isbn13 = toIsbn13(book.code);
+    if (!isbn13) return res.status(400).json({ error: "Only books with an ISBN can be listed from here" });
+    if (book.amazonPrice !== null && !amazon.amazonListingConfigured()) {
+      return res.status(400).json({ error: "Amazon listing isn't set up yet (AMAZON_SELLER_ID)" });
+    }
+    if (book.ebayPrice !== null && !ebay.ebayListingConfigured()) {
+      return res.status(400).json({ error: "eBay listing isn't set up yet (connect eBay and set EBAY_POSTAL_CODE)" });
+    }
+
+    const condition = bookCondition(book.condition);
+    const sku = newSku(isbn13);
+    inventoryStore.upsert({ sku, title: book.title, quantity: book.quantity });
+    const result: ListBookResponse = { sku, amazon: null, ebay: null };
+
+    if (book.ebayPrice !== null) {
+      try {
+        const { itemId, shippingPolicy } = await ebay.createListing({
+          sku,
+          isbn13,
+          title: book.title,
+          conditionId: condition.ebayId,
+          note: book.note,
+          price: book.ebayPrice,
+          quantity: book.quantity,
+        });
+        const url = `https://www.ebay.com/itm/${itemId}`;
+        inventoryStore.upsert({ sku, title: book.title, quantity: book.quantity, ebayItemId: itemId });
+        listings.addListing({
+          itemId,
+          sku,
+          title: book.title,
+          isbn: isbn13,
+          price: book.ebayPrice,
+          quantity: book.quantity,
+          condition: condition.label,
+          url,
+        });
+        inventoryStore.log("info", `Listed on eBay at $${book.ebayPrice.toFixed(2)} (item ${itemId})`, sku);
+        result.ebay = { ok: true, message: `Listed at $${book.ebayPrice.toFixed(2)}, shipping policy "${shippingPolicy}"`, url };
+      } catch (e) {
+        inventoryStore.log("error", `eBay listing failed: ${(e as Error).message}`, sku);
+        result.ebay = { ok: false, message: (e as Error).message };
+      }
+    }
+
+    if (book.amazonPrice !== null) {
+      try {
+        await amazon.createOffer({
+          sku,
+          asin: book.asin!,
+          conditionType: condition.amazon,
+          note: book.note,
+          price: book.amazonPrice,
+          quantity: book.quantity,
+        });
+        inventoryStore.upsert({ sku, title: book.title, quantity: book.quantity, amazonSku: sku });
+        inventoryStore.log("info", `Listed on Amazon at $${book.amazonPrice.toFixed(2)}`, sku);
+        result.amazon = {
+          ok: true,
+          message: `Listed at $${book.amazonPrice.toFixed(2)}. Live on Amazon within about 15 minutes.`,
+          url: `https://www.amazon.com/dp/${book.asin}`,
+        };
+      } catch (e) {
+        inventoryStore.log("error", `Amazon listing failed: ${(e as Error).message}`, sku);
+        result.amazon = { ok: false, message: (e as Error).message };
+      }
+    }
+
+    // Nothing was listed, so there's nothing to keep in sync.
+    if (!result.amazon?.ok && !result.ebay?.ok) {
+      const item = inventoryStore.getBySku(sku);
+      if (item) inventoryStore.deleteItem(item.id);
+    }
+    res.json(result);
   });
 
   app.put("/api/scan/settings", requireAdmin, (req, res) => {

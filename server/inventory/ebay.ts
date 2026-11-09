@@ -4,7 +4,8 @@ import { API_HOST, appToken, tokenRequest } from "./ebayApp";
 
 // eBay: OAuth user token (authorization-code grant, refreshed automatically),
 // the Fulfillment API to read orders, and the Trading API to change listing
-// quantities. Works for listings created anywhere (Seller Hub, app, etc.).
+// quantities and list scanned books. Works for listings created anywhere
+// (Seller Hub, app, etc.).
 //
 // Env: EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_RU_NAME (from
 // developer.ebay.com → Application Keys / User Tokens).
@@ -244,6 +245,106 @@ export function parseListingDetails(xml: string): EbayListingDetails {
     condition: tag(xml, "ConditionDisplayName") ?? null,
     imageUrl: tag(xml, "GalleryURL") ?? tag(xml, "PictureURL") ?? null,
   };
+}
+
+// ---- New listings (Trading API) --------------------------------------------
+// Needs EBAY_POSTAL_CODE (where books ship from). Shipping, returns and
+// payment come from the account's business policies.
+
+export function ebayListingConfigured(): boolean {
+  return ebayConnected() && Boolean(process.env.EBAY_POSTAL_CODE);
+}
+
+const BOOKS_CATEGORY = "261186"; // Books & Magazines > Books
+
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+export interface BusinessPolicy {
+  type: string; // "SHIPPING" | "RETURN_POLICY" | "PAYMENT"
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export function parseBusinessPolicies(xml: string): BusinessPolicy[] {
+  return (xml.match(/<SupportedSellerProfile>[\s\S]*?<\/SupportedSellerProfile>/g) ?? []).flatMap((p) => {
+    const id = tag(p, "ProfileID");
+    const type = tag(p, "ProfileType");
+    if (!id || !type) return [];
+    return [{ type, id, name: tag(p, "ProfileName") ?? id, isDefault: tag(p, "IsDefault") === "true" }];
+  });
+}
+
+let cachedPolicies: { policies: BusinessPolicy[]; at: number } | null = null;
+
+// The default policy of each kind, or the first if none is marked default.
+async function defaultPolicies(): Promise<Record<"SHIPPING" | "RETURN_POLICY" | "PAYMENT", BusinessPolicy>> {
+  if (!cachedPolicies || Date.now() - cachedPolicies.at > 60 * 60 * 1000) {
+    const xml = await trading("GetUserPreferences", "<ShowSellerProfilePreferences>true</ShowSellerProfilePreferences>");
+    cachedPolicies = { policies: parseBusinessPolicies(xml), at: Date.now() };
+  }
+  const pick = (type: string) => {
+    const all = cachedPolicies!.policies.filter((p) => p.type === type);
+    const found = all.find((p) => p.isDefault) ?? all[0];
+    if (!found) {
+      throw new Error("Set up shipping, return and payment policies in eBay Seller Hub (Account → Business policies) first");
+    }
+    return found;
+  };
+  return { SHIPPING: pick("SHIPPING"), RETURN_POLICY: pick("RETURN_POLICY"), PAYMENT: pick("PAYMENT") };
+}
+
+export interface NewListing {
+  sku: string;
+  isbn13: string;
+  title: string;
+  conditionId: number;
+  note: string;
+  price: number;
+  quantity: number;
+}
+
+// Fixed-price, good 'til cancelled. eBay's catalog fills in the book's details
+// and stock photo from the ISBN.
+export async function createListing(listing: NewListing): Promise<{ itemId: string; shippingPolicy: string }> {
+  const policies = await defaultPolicies();
+  // eBay rejects a condition description on new items.
+  const note = listing.note && listing.conditionId !== 1000
+    ? `<ConditionDescription>${escapeXml(listing.note)}</ConditionDescription>`
+    : "";
+  const xml = await trading(
+    "AddFixedPriceItem",
+    `<Item>` +
+      `<Title>${escapeXml(listing.title.slice(0, 80))}</Title>` +
+      `<SKU>${escapeXml(listing.sku)}</SKU>` +
+      `<PrimaryCategory><CategoryID>${BOOKS_CATEGORY}</CategoryID></PrimaryCategory>` +
+      `<StartPrice currencyID="USD">${listing.price.toFixed(2)}</StartPrice>` +
+      `<Quantity>${listing.quantity}</Quantity>` +
+      `<ConditionID>${listing.conditionId}</ConditionID>${note}` +
+      `<ProductListingDetails><ISBN>${listing.isbn13}</ISBN>` +
+      `<IncludeStockPhotoURL>true</IncludeStockPhotoURL><UseStockPhotoURLAsGallery>true</UseStockPhotoURLAsGallery>` +
+      `<IncludeeBayProductDetails>true</IncludeeBayProductDetails><UseFirstProduct>true</UseFirstProduct>` +
+      `</ProductListingDetails>` +
+      `<Country>US</Country><Currency>USD</Currency>` +
+      `<PostalCode>${escapeXml(process.env.EBAY_POSTAL_CODE!)}</PostalCode>` +
+      `<ListingType>FixedPriceItem</ListingType><ListingDuration>GTC</ListingDuration>` +
+      `<SellerProfiles>` +
+      `<SellerShippingProfile><ShippingProfileID>${policies.SHIPPING.id}</ShippingProfileID></SellerShippingProfile>` +
+      `<SellerReturnProfile><ReturnProfileID>${policies.RETURN_POLICY.id}</ReturnProfileID></SellerReturnProfile>` +
+      `<SellerPaymentProfile><PaymentProfileID>${policies.PAYMENT.id}</PaymentProfileID></SellerPaymentProfile>` +
+      `</SellerProfiles>` +
+      `</Item>`,
+  );
+  const itemId = tag(xml, "ItemID");
+  if (!itemId) throw new Error("eBay listed the book but didn't return its item number");
+  return { itemId, shippingPolicy: policies.SHIPPING.name };
 }
 
 // ---- What others charge (Browse API) ---------------------------------------
