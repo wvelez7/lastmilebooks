@@ -7,9 +7,10 @@ import { inventoryStore } from "./store";
 import * as supplies from "./supplies";
 import * as whatnot from "./whatnot";
 import * as ebay from "./ebay";
+import * as amazon from "./amazon";
 import * as listings from "./listings";
 import { parseActiveListingsReport, ReportError } from "./ebayReport";
-import { handleWhatnotOrder, importListings, pushQuantity, runSyncOnce } from "./sync";
+import { AMAZON_POLL_MS, handleWhatnotOrder, importListings, pushQuantity, runSyncOnce } from "./sync";
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   const expected = process.env.ADMIN_KEY;
@@ -184,7 +185,36 @@ export function registerInventoryRoutes(app: Express) {
   // Shipping supplies (admin page at /#/supplies). Any stock change can cross a
   // reorder point, so each route below re-checks and emails in the background.
   app.get("/api/supplies", requireAdmin, (_req, res) => {
-    res.json({ supplies: supplies.listSupplies() });
+    const checked = (key: string) => inventoryStore.getState(key) ?? null;
+    const halfHour = 30 * 60 * 1000;
+    res.json({
+      // Where orders are counted from, when each was last read, and how long
+      // without a check means something is wrong.
+      sources: [
+        {
+          name: "eBay",
+          on: ebay.ebayConnected(),
+          checkedAt: checked("ebay_orders_since"),
+          error: null,
+          staleAfterMs: halfHour,
+        },
+        {
+          name: "Whatnot",
+          on: whatnot.whatnotConfigured(),
+          checkedAt: checked("whatnot_orders_since"),
+          error: null,
+          staleAfterMs: halfHour,
+        },
+        {
+          name: "Amazon",
+          on: amazon.amazonConfigured(),
+          checkedAt: checked("amazon_orders_since"),
+          error: checked("amazon_last_error") || null,
+          staleAfterMs: AMAZON_POLL_MS + 2 * 60 * 60 * 1000,
+        },
+      ],
+      supplies: supplies.listSupplies(),
+    });
   });
 
   app.post("/api/supplies", requireAdmin, (req, res) => {

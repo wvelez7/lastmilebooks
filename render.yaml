@@ -31,6 +31,12 @@ services:
         sync: false
       - key: EBAY_VERIFICATION_TOKEN
         sync: false
+      - key: AMAZON_LWA_CLIENT_ID
+        sync: false
+      - key: AMAZON_LWA_CLIENT_SECRET
+        sync: false
+      - key: AMAZON_REFRESH_TOKEN
+        sync: false
       - key: EMAIL_TO
         value: thelastmilebooks@gmail.com,haylee@lastmilebooks.com
       - key: EMAIL_REPLY_TO

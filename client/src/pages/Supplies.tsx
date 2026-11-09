@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { formatDistanceToNow } from "date-fns";
 import { isLowOnSupply } from "@shared/schema";
 import type { Supply } from "@shared/schema";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,22 @@ import { useToast } from "@/hooks/use-toast";
 // and enter the ADMIN_KEY. Shares the inventory page's key for the session.
 
 const KEY_STORAGE = "lmb-admin-key";
+interface OrderSource {
+  name: string;
+  on: boolean;
+  checkedAt: string | null;
+  error: string | null;
+  staleAfterMs: number; // no successful check in this long = something's wrong
+}
+
+function sourceStatus(s: OrderSource): { text: string; problem: boolean } {
+  if (!s.on) return { text: "not set up", problem: false };
+  if (s.error) return { text: "last check failed", problem: true };
+  if (!s.checkedAt) return { text: "waiting for first check", problem: false };
+  const ago = formatDistanceToNow(new Date(s.checkedAt), { addSuffix: true });
+  const stale = Date.now() - new Date(s.checkedAt).getTime() > s.staleAfterMs;
+  return { text: stale ? `no check since ${ago}` : `checked ${ago}`, problem: stale };
+}
 
 function readKey(): string {
   try {
@@ -45,6 +62,7 @@ export default function Supplies() {
   const [adminKey, setAdminKey] = useState(readKey);
   const [keyDraft, setKeyDraft] = useState("");
   const [rows, setRows] = useState<Supply[] | null>(null);
+  const [sources, setSources] = useState<OrderSource[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -80,7 +98,9 @@ export default function Supplies() {
   const load = useCallback(async () => {
     if (!adminKey) return;
     try {
-      setRows((await api("GET", "/api/supplies")).supplies);
+      const data = await api("GET", "/api/supplies");
+      setRows(data.supplies);
+      setSources(data.sources);
     } catch (e) {
       toast({ title: "Couldn't load supplies", description: (e as Error).message, variant: "destructive" });
     }
@@ -211,6 +231,26 @@ export default function Supplies() {
           </div>
           {!formOpen && <Button onClick={() => setFormOpen(true)}>Add supply</Button>}
         </header>
+
+        {sources.length > 0 && (
+          <p className="text-sm text-muted-foreground">
+            Orders counted from:{" "}
+            {sources.map((s, i) => {
+              const status = sourceStatus(s);
+              return (
+                <span key={s.name}>
+                  {i > 0 && " · "}
+                  <span
+                    className={status.problem ? "text-destructive" : undefined}
+                    title={s.error ?? undefined}
+                  >
+                    {s.name} {status.text}
+                  </span>
+                </span>
+              );
+            })}
+          </p>
+        )}
 
         {formOpen && (
           <Card>

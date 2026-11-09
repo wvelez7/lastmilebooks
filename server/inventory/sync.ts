@@ -2,6 +2,7 @@ import type { InventoryItem, Platform } from "@shared/schema";
 import { inventoryStore } from "./store";
 import * as whatnot from "./whatnot";
 import * as ebay from "./ebay";
+import * as amazon from "./amazon";
 import { useSuppliesForOrder } from "./supplies";
 import { sendTeamAlert } from "../email";
 
@@ -202,6 +203,40 @@ async function pollEbay(): Promise<void> {
   inventoryStore.setState("ebay_orders_since", started.toISOString());
 }
 
+// ---- Amazon ----------------------------------------------------------------
+
+// Amazon only counts against shipping supplies; books aren't synced there, so
+// once a day is enough. A failed check is retried every 5 minutes instead.
+export const AMAZON_POLL_MS = (Number(process.env.AMAZON_POLL_SECONDS) || 86_400) * 1000;
+const AMAZON_RETRY_MS = Math.min(5 * 60 * 1000, AMAZON_POLL_MS);
+let lastAmazonAttempt = 0;
+
+async function pollAmazon(): Promise<void> {
+  // Last success is saved, so a restart or deploy doesn't trigger an early check.
+  const lastSuccess = inventoryStore.getState("amazon_orders_since");
+  if (lastSuccess && Date.now() - new Date(lastSuccess).getTime() < AMAZON_POLL_MS) return;
+  if (Date.now() - lastAmazonAttempt < AMAZON_RETRY_MS) return;
+  lastAmazonAttempt = Date.now();
+  const started = new Date();
+  // Orders placed before the first check were never counted and are skipped
+  // even when they ship later. The checked-up-to time is only saved on success,
+  // so the supplies page can show whether Amazon is really working.
+  const firstCheck = checkpoint("amazon_orders_start", started);
+  const since = new Date(inventoryStore.getState("amazon_orders_since") ?? started.toISOString());
+  try {
+    const orders = await amazon.listShippableOrdersSince(new Date(since.getTime() - OVERLAP_MS));
+    for (const order of orders) {
+      if (new Date(order.PurchaseDate) < firstCheck) continue;
+      await useSuppliesForOrder(`amazon:${order.AmazonOrderId}`);
+    }
+  } catch (e) {
+    inventoryStore.setState("amazon_last_error", (e as Error).message);
+    throw e;
+  }
+  inventoryStore.setState("amazon_last_error", "");
+  inventoryStore.setState("amazon_orders_since", started.toISOString());
+}
+
 // First poll starts from "now" so old orders are never replayed.
 function checkpoint(key: string, now: Date): Date {
   const saved = inventoryStore.getState(key);
@@ -228,6 +263,11 @@ export async function runSyncOnce(): Promise<void> {
         inventoryStore.log("error", `eBay order check failed: ${(e as Error).message}`),
       );
     }
+    if (amazon.amazonConfigured()) {
+      await pollAmazon().catch((e) =>
+        inventoryStore.log("error", `Amazon order check failed: ${(e as Error).message}`),
+      );
+    }
     for (const id of Array.from(pending())) {
       const item = inventoryStore.getById(id);
       if (item) await pushQuantity(item);
@@ -244,7 +284,7 @@ export async function runSyncOnce(): Promise<void> {
 
 export function startInventorySync(): void {
   const seconds = Number(process.env.INVENTORY_POLL_SECONDS) || 60;
-  if (!whatnot.whatnotConfigured() && !ebay.ebayAppConfigured()) {
+  if (!whatnot.whatnotConfigured() && !ebay.ebayAppConfigured() && !amazon.amazonConfigured()) {
     console.log("[inventory] No marketplace credentials set; sync is off.");
     return;
   }
