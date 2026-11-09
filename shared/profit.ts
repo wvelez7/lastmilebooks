@@ -12,6 +12,9 @@ export const scanSettingsSchema = z.object({
   salesTaxPercent: z.number().min(0).max(100), // typical buyer rate (varies by state)
   shippingCost: z.number().min(0), // postage + supplies you pay per book
   bookCost: z.number().min(0), // what you paid for the average book
+  amazonReferralPercent: z.number().min(0).max(100), // charged on price + shipping
+  amazonClosingFee: z.number().min(0), // flat fee per book sold
+  amazonShippingCredit: z.number().min(0), // shipping Amazon charges the buyer for a book
 });
 
 export type ScanSettings = z.infer<typeof scanSettingsSchema>;
@@ -23,6 +26,9 @@ export const DEFAULT_SCAN_SETTINGS: ScanSettings = {
   salesTaxPercent: 8,
   shippingCost: 5.5,
   bookCost: 0,
+  amazonReferralPercent: 15,
+  amazonClosingFee: 1.8,
+  amazonShippingCredit: 3.99,
 };
 
 const SMALL_ORDER_LIMIT = 10;
@@ -64,6 +70,34 @@ export function computeProfit(
     shippingCost: settings.shippingCost,
     bookCost: settings.bookCost,
     profit: roundCents(subtotal - finalValueFee - orderFee - settings.shippingCost - settings.bookCost),
+  };
+}
+
+export interface AmazonProfitBreakdown {
+  price: number;
+  shippingCredit: number;
+  referralFee: number;
+  closingFee: number;
+  shippingCost: number;
+  bookCost: number;
+  profit: number;
+}
+
+// Shipping it yourself: Amazon sets the shipping the buyer pays for a book and
+// takes its referral fee on that too, but not on sales tax.
+export function computeAmazonProfit(price: number, settings: ScanSettings): AmazonProfitBreakdown {
+  const shippingCredit = settings.amazonShippingCredit;
+  const referralFee = (price + shippingCredit) * (settings.amazonReferralPercent / 100);
+  return {
+    price: roundCents(price),
+    shippingCredit,
+    referralFee: roundCents(referralFee),
+    closingFee: settings.amazonClosingFee,
+    shippingCost: settings.shippingCost,
+    bookCost: settings.bookCost,
+    profit: roundCents(
+      price + shippingCredit - referralFee - settings.amazonClosingFee - settings.shippingCost - settings.bookCost,
+    ),
   };
 }
 

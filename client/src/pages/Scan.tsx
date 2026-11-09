@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "wouter";
 import type { EbayListingRow } from "@shared/schema";
-import { computeProfit, DEFAULT_SCAN_SETTINGS, scanSettingsSchema } from "@shared/profit";
+import { computeAmazonProfit, computeProfit, DEFAULT_SCAN_SETTINGS, scanSettingsSchema } from "@shared/profit";
 import type { ScanSettings } from "@shared/profit";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,9 +12,10 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 
-// Phone page for checking a book against the eBay store. Not linked from the
-// site; open /#/scan and enter the ADMIN_KEY. Remembered on the device (unlike
-// /#/inventory) because it's opened many times a day from the home screen.
+// Phone page for checking a book against the eBay store and Amazon's prices.
+// Not linked from the site; open /#/scan and enter the ADMIN_KEY. Remembered on
+// the device (unlike /#/inventory) because it's opened many times a day from
+// the home screen.
 
 const KEY_STORAGE = "lmb-scan-key";
 const RESCAN_MS = 3000; // ignore the same barcode while it's still in frame
@@ -41,6 +42,27 @@ interface LookupResponse {
   market: MarketOffer[];
   marketError: string | null;
   marketAvailable: boolean;
+  amazon: AmazonBook | null;
+  amazonError: string | null;
+  amazonAvailable: boolean;
+}
+
+interface AmazonPrice {
+  price: number;
+  shipping: number;
+}
+
+interface AmazonBook {
+  asin: string;
+  title: string;
+  imageUrl: string | null;
+  salesRank: number | null;
+  lowestUsed: AmazonPrice | null; // sellers who ship it themselves
+  lowestUsedFba: AmazonPrice | null;
+  lowestNew: AmazonPrice | null;
+  buyBoxUsed: AmazonPrice | null;
+  usedOffers: number;
+  newOffers: number;
 }
 
 function readKey(): string {
@@ -149,6 +171,101 @@ function ListingCard({ listing, settings }: { listing: EbayListingRow; settings:
             View on eBay
           </a>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function landed(p: AmazonPrice | null): string {
+  return p ? money(p.price + p.shipping) : "—";
+}
+
+// Starts at the price that matches the cheapest used copy someone ships
+// themselves (counting shipping), which is what buyers compare.
+function suggestedAmazonPrice(book: AmazonBook, settings: ScanSettings): number | null {
+  const match = book.lowestUsed ?? book.buyBoxUsed ?? book.lowestUsedFba;
+  if (!match) return null;
+  return Math.max(0.01, Math.round((match.price + match.shipping - settings.amazonShippingCredit) * 100) / 100);
+}
+
+function AmazonCard({ book, settings }: { book: AmazonBook; settings: ScanSettings }) {
+  const suggested = suggestedAmazonPrice(book, settings);
+  const [priceDraft, setPriceDraft] = useState(suggested === null ? "" : suggested.toFixed(2));
+  const price = Number(priceDraft);
+  const p = priceDraft.trim() !== "" && price > 0 ? computeAmazonProfit(price, settings) : null;
+
+  return (
+    <Card data-testid="card-amazon">
+      <CardContent className="space-y-3 p-4">
+        <div className="flex gap-3">
+          {book.imageUrl && <img src={book.imageUrl} alt="" className="h-16 w-12 flex-none rounded object-cover" />}
+          <div className="min-w-0">
+            <div className="text-xs font-medium text-muted-foreground">Amazon</div>
+            <div className="font-medium leading-snug">{book.title || book.asin}</div>
+            <div className="mt-1 text-sm" data-testid="text-sales-rank">
+              {book.salesRank === null ? "No sales rank" : `Rank #${book.salesRank.toLocaleString()} in Books`}
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-sm">
+          <div>
+            <div className="text-xs text-muted-foreground">Used, seller ships</div>
+            <div className="tabular-nums" data-testid="text-amazon-used">{landed(book.lowestUsed)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Used, FBA</div>
+            <div className="tabular-nums">{landed(book.lowestUsedFba)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">New</div>
+            <div className="tabular-nums">{landed(book.lowestNew)}</div>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Lowest prices including shipping. {book.usedOffers} used and {book.newOffers} new offers.
+        </p>
+        <div className="grid grid-cols-2 items-end gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="amazon-price" className="text-xs text-muted-foreground">Your price</Label>
+            <Input
+              id="amazon-price"
+              inputMode="decimal"
+              value={priceDraft}
+              onChange={(e) => setPriceDraft(e.target.value)}
+              data-testid="input-amazon-price"
+            />
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Profit if sold</div>
+            <div
+              className={`text-2xl font-semibold tabular-nums ${p && p.profit < 0 ? "text-destructive" : "text-green-700 dark:text-green-400"}`}
+              data-testid="text-amazon-profit"
+            >
+              {p ? money(p.profit) : "—"}
+            </div>
+          </div>
+        </div>
+        {p && (
+          <details className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground">How this adds up</summary>
+            <div className="mt-2 space-y-1">
+              <Row label="Book price" value={money(p.price)} />
+              <Row label="Shipping paid by buyer" value={money(p.shippingCredit)} />
+              <Row label={`Amazon referral fee (${settings.amazonReferralPercent}% incl. shipping)`} value={money(-p.referralFee)} />
+              <Row label="Amazon closing fee" value={money(-p.closingFee)} />
+              <Row label="Postage + supplies" value={money(-p.shippingCost)} />
+              <Row label="Cost of book" value={money(-p.bookCost)} />
+            </div>
+          </details>
+        )}
+        <a
+          href={`https://www.amazon.com/dp/${book.asin}`}
+          target="_blank"
+          rel="noreferrer"
+          className="block text-sm underline"
+        >
+          View on Amazon
+        </a>
       </CardContent>
     </Card>
   );
@@ -290,6 +407,9 @@ const SETTING_FIELDS: { key: keyof ScanSettings; label: string; hint?: string }[
   { key: "orderFeeSmall", label: "Per-order fee, orders $10 or less ($)" },
   { key: "orderFeeLarge", label: "Per-order fee, orders over $10 ($)" },
   { key: "salesTaxPercent", label: "Typical buyer sales tax (%)", hint: "eBay's fee is charged on this too." },
+  { key: "amazonReferralPercent", label: "Amazon referral fee (%)", hint: "Books: 15%, charged on shipping too." },
+  { key: "amazonClosingFee", label: "Amazon closing fee ($)", hint: "Flat fee on every book sold." },
+  { key: "amazonShippingCredit", label: "Amazon shipping paid by buyer ($)", hint: "Set by Amazon for books." },
 ];
 
 function SettingsForm({
@@ -505,6 +625,14 @@ export default function Scan() {
           {lookup && !looking && (
             <div className="space-y-3" data-testid="section-result">
               <p className="text-xs text-muted-foreground">Barcode {lookup.code}</p>
+
+              {lookup.amazon && <AmazonCard key={lookup.code} book={lookup.amazon} settings={settings} />}
+              {lookup.amazonAvailable && !lookup.amazon && !lookup.amazonError && (
+                <p className="text-sm text-muted-foreground" data-testid="text-amazon-missing">Not found on Amazon.</p>
+              )}
+              {lookup.amazonError && (
+                <p className="text-sm text-destructive" data-testid="text-amazon-error">{lookup.amazonError}</p>
+              )}
 
               {lookup.listings.map((l) => (
                 <ListingCard key={l.itemId} listing={l} settings={settings} />

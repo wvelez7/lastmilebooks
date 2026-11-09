@@ -142,7 +142,9 @@ export function listingStatus() {
 
 export function getScanSettings(): ScanSettings {
   try {
-    return scanSettingsSchema.parse(JSON.parse(inventoryStore.getState(SETTINGS_KEY) ?? ""));
+    // Defaults fill in settings added since these were saved.
+    const saved = JSON.parse(inventoryStore.getState(SETTINGS_KEY) ?? "");
+    return scanSettingsSchema.parse({ ...DEFAULT_SCAN_SETTINGS, ...saved });
   } catch {
     return DEFAULT_SCAN_SETTINGS;
   }

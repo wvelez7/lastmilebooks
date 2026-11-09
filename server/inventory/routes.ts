@@ -119,19 +119,44 @@ export function registerInventoryRoutes(app: Express) {
 
   app.get("/api/scan/lookup/:code", requireAdmin, async (req, res) => {
     const code = String(req.params.code).trim();
+    const isbn13 = toIsbn13(code);
     const found = listings.findListings(code);
     let market: ebay.EbayMarketOffer[] = [];
     let marketError: string | null = null;
-    // Not one of ours: show what the book is going for instead.
-    if (found.length === 0 && ebay.ebayAppConfigured() && /^\d{8,14}$/.test(code)) {
-      try {
-        market = await ebay.searchMarket(toIsbn13(code) ?? code);
-      } catch (e) {
-        marketError = (e as Error).message;
-        inventoryStore.log("warn", `eBay price search failed: ${marketError}`);
-      }
-    }
-    res.json({ code, listings: found, market, marketError, marketAvailable: ebay.ebayAppConfigured() });
+    let amazonBook: amazon.AmazonBook | null = null;
+    let amazonError: string | null = null;
+    await Promise.all([
+      // Not one of ours: show what the book is going for instead.
+      (async () => {
+        if (found.length > 0 || !ebay.ebayAppConfigured() || !/^\d{8,14}$/.test(code)) return;
+        try {
+          market = await ebay.searchMarket(isbn13 ?? code);
+        } catch (e) {
+          marketError = (e as Error).message;
+          inventoryStore.log("warn", `eBay price search failed: ${marketError}`);
+        }
+      })(),
+      // Checked even when it's on eBay, since it might be worth more on Amazon.
+      (async () => {
+        if (!isbn13 || !amazon.amazonConfigured()) return;
+        try {
+          amazonBook = await amazon.lookupBook(isbn13);
+        } catch (e) {
+          amazonError = (e as Error).message;
+          inventoryStore.log("warn", `Amazon price check failed: ${amazonError}`);
+        }
+      })(),
+    ]);
+    res.json({
+      code,
+      listings: found,
+      market,
+      marketError,
+      marketAvailable: ebay.ebayAppConfigured(),
+      amazon: amazonBook,
+      amazonError,
+      amazonAvailable: amazon.amazonConfigured() && isbn13 !== null,
+    });
   });
 
   app.put("/api/scan/settings", requireAdmin, (req, res) => {
