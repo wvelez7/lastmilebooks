@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import {
   BOOK_CONDITIONS,
+  buildSku,
   itemProblem,
   listingSettingsSchema,
   researchLinks,
@@ -620,18 +621,37 @@ export function BatchTab({
   );
 }
 
-export function SkuSettingsForm({ settings, onSave }: { settings: ListingSettings; onSave: (s: ListingSettings) => Promise<void> }) {
+export function SkuSettingsForm({
+  settings,
+  onSave,
+}: {
+  settings: ListingSettings;
+  onSave: (s: ListingSettings, applyToUnlisted: boolean) => Promise<void>;
+}) {
   const [draft, setDraft] = useState(settings.skuTemplate);
+  const [applyToUnlisted, setApplyToUnlisted] = useState(true);
   const [saving, setSaving] = useState(false);
   useEffect(() => setDraft(settings.skuTemplate), [settings.skuTemplate]);
   const parsed = listingSettingsSchema.safeParse({ skuTemplate: draft });
+  const example = parsed.success
+    ? buildSku(parsed.data.skuTemplate, {
+        seq: 1,
+        scannedAt: new Date().toISOString(),
+        condition: "good",
+        amazonPrice: 32.35,
+        isbn13: "9780140449136",
+        asin: "0140449132",
+        batchId: 1,
+        box: "32",
+      })
+    : null;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!parsed.success) return;
     setSaving(true);
     try {
-      await onSave(parsed.data);
+      await onSave(parsed.data, applyToUnlisted);
     } finally {
       setSaving(false);
     }
@@ -642,6 +662,12 @@ export function SkuSettingsForm({ settings, onSave }: { settings: ListingSetting
       <Label htmlFor="sku-template">SKU pattern</Label>
       <Input id="sku-template" value={draft} onChange={(e) => setDraft(e.target.value)} data-testid="input-sku-template" />
       {!parsed.success && <p className="text-xs text-destructive">{parsed.error.issues[0]?.message}</p>}
+      {example && (
+        <p className="text-sm" data-testid="text-sku-example">
+          Example: <span className="font-mono font-medium">{example}</span>
+          <span className="block text-xs text-muted-foreground">Box 32, $32.35, first book</span>
+        </p>
+      )}
       <ul className="space-y-0.5 text-xs text-muted-foreground">
         {SKU_TOKENS.map((t) => (
           <li key={t.token}>
@@ -652,9 +678,18 @@ export function SkuSettingsForm({ settings, onSave }: { settings: ListingSetting
           </li>
         ))}
       </ul>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={applyToUnlisted}
+          onChange={(e) => setApplyToUnlisted(e.target.checked)}
+          data-testid="checkbox-apply-unlisted"
+        />
+        Also change the SKUs of books not listed yet
+      </label>
       <p className="text-xs text-muted-foreground">
-        Used for books scanned from now on. If the pattern has {"{COND}"} or {"{PRICE}"}, changing a book's condition or
-        price before listing updates its SKU too.
+        If the pattern has {"{COND}"}, {"{PRICE}"} or {"{BOX}"}, changing a book's condition, price or box before listing
+        updates its SKU too.
       </p>
       <Button type="submit" className="w-full" disabled={!parsed.success || saving} data-testid="button-save-sku">
         {saving ? "Saving…" : "Save SKU pattern"}

@@ -84,11 +84,12 @@ export function researchLinks(isbn13: string, asin: string | null) {
 // ---- Custom SKUs -------------------------------------------------------------
 
 export const SKU_TOKENS = [
-  { token: "{SEQ}", meaning: "running number, never repeats (required)" },
+  { token: "{SEQ}", meaning: "running count, like 01, 02 … never repeats (required)" },
   { token: "{BOX}", meaning: "the box the book is stored in" },
   { token: "{DATE}", meaning: "date scanned, like 261109" },
+  { token: "{MMYY}", meaning: "month and year scanned, like 1126" },
   { token: "{COND}", meaning: "condition: N, LN, VG, G or A" },
-  { token: "{PRICE}", meaning: "Amazon price in cents, like 709" },
+  { token: "{PRICE}", meaning: "Amazon price, like 32.35" },
   { token: "{ISBN}", meaning: "ISBN-13" },
   { token: "{ASIN}", meaning: "Amazon ASIN" },
   { token: "{BATCH}", meaning: "batch number" },
@@ -129,25 +130,55 @@ export interface SkuParts {
   box: string;
 }
 
+// The date where the books are, not the server's clock (UTC), so an evening
+// scan doesn't get tomorrow's date.
+function scanDate(iso: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(iso));
+  const get = (type: string) => parts.find((x) => x.type === type)?.value ?? "00";
+  return { yy: get("year"), mm: get("month"), dd: get("day") };
+}
+
 export function buildSku(template: string, p: SkuParts): string {
-  const d = new Date(p.scannedAt);
-  const date = [d.getFullYear() % 100, d.getMonth() + 1, d.getDate()].map((n) => String(n).padStart(2, "0")).join("");
+  const { yy, mm, dd } = scanDate(p.scannedAt);
   const values: Record<string, string> = {
-    "{SEQ}": String(p.seq).padStart(4, "0"),
-    "{DATE}": date,
+    "{SEQ}": String(p.seq).padStart(2, "0"),
+    "{DATE}": `${yy}${mm}${dd}`,
+    "{MMYY}": `${mm}${yy}`,
     "{COND}": bookCondition(p.condition).code,
-    "{PRICE}": p.amazonPrice === null ? "0" : String(Math.round(p.amazonPrice * 100)),
+    "{PRICE}": (p.amazonPrice ?? 0).toFixed(2),
     "{ISBN}": p.isbn13,
     "{ASIN}": p.asin ?? "",
     "{BATCH}": String(p.batchId),
     "{BOX}": p.box,
   };
-  // An empty token (no box yet) would leave "--"; close the gap instead.
+  // An empty token (no box yet) would leave "--"; close the gap instead. Never
+  // cut short: the running count is usually last, and cutting it off could
+  // give two books the same SKU. Callers reject one over MAX_SKU_LENGTH.
   return template
     .replace(/\{[A-Z]+\}/g, (t) => values[t] ?? t)
     .replace(/([-_.])[-_.]+/g, "$1")
-    .replace(/^[-_.]+|[-_.]+$/g, "")
-    .slice(0, MAX_SKU_LENGTH);
+    .replace(/^[-_.]+|[-_.]+$/g, "");
+}
+
+// The longest SKU a pattern is likely to make, for checking it when saved.
+// Assumes a 4-character box and a price under $1,000; a longer box is caught
+// when a book is scanned.
+export function longestSku(template: string): string {
+  return buildSku(template, {
+    seq: 9999,
+    scannedAt: "2026-12-31T20:00:00Z",
+    condition: "like_new",
+    amazonPrice: 999.99,
+    isbn13: "9780000000000",
+    asin: "B000000000",
+    batchId: 9999,
+    box: "BOX1",
+  });
 }
 
 // ---- Batches -------------------------------------------------------------------

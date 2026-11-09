@@ -9,6 +9,7 @@ import {
   batchItemPatchSchema,
   DEFAULT_BATCH_DEFAULTS,
   listingSettingsSchema,
+  longestSku,
   MAX_SKU_LENGTH,
 } from "@shared/listing";
 import type { AmazonBook } from "@shared/listing";
@@ -270,21 +271,17 @@ export function registerInventoryRoutes(app: Express) {
   app.put("/api/listing-settings", requireAdmin, (req, res) => {
     const parsed = listingSettingsSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
-    // The longest values each token can take must still fit Amazon's limit.
-    const longest = parsed.data.skuTemplate
-      .replace(/\{SEQ\}/g, "999999")
-      .replace(/\{DATE\}/g, "261231")
-      .replace(/\{COND\}/g, "LN")
-      .replace(/\{PRICE\}/g, "99999")
-      .replace(/\{ISBN\}/g, "9780000000000")
-      .replace(/\{ASIN\}/g, "B000000000")
-      .replace(/\{BATCH\}/g, "9999")
-      .replace(/\{BOX\}/g, "BOX12345");
+    // A typical long SKU must fit Amazon's limit; a book whose SKU still comes
+    // out too long is refused when scanned.
+    const longest = longestSku(parsed.data.skuTemplate);
     if (longest.length > MAX_SKU_LENGTH) {
-      return res.status(400).json({ error: `That pattern can make SKUs over Amazon's ${MAX_SKU_LENGTH} characters` });
+      return res.status(400).json({
+        error: `That pattern makes SKUs like ${longest} (${longest.length} characters); Amazon allows ${MAX_SKU_LENGTH}`,
+      });
     }
     batches.saveListingSettings(parsed.data);
-    res.json(parsed.data);
+    const applied = req.body?.applyToUnlisted === true ? batches.applyPatternToUnlisted() : null;
+    res.json({ ...parsed.data, applied });
   });
 
   app.put("/api/scan/settings", requireAdmin, (req, res) => {

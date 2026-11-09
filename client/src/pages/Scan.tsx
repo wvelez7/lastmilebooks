@@ -1008,11 +1008,19 @@ export default function Scan() {
           {overview && (
             <SkuSettingsForm
               settings={overview.settings}
-              onSave={async (next) => {
+              onSave={async (next, applyToUnlisted) => {
                 try {
-                  const saved = await api("PUT", "/api/listing-settings", next);
-                  setOverview((o) => (o ? { ...o, settings: saved } : o));
-                  toast({ title: "SKU pattern saved" });
+                  const saved = await api("PUT", "/api/listing-settings", { ...next, applyToUnlisted });
+                  setOverview((o) => (o ? { ...o, settings: { skuTemplate: saved.skuTemplate } } : o));
+                  const applied: { updated: number; tooLong: string[] } | null = saved.applied;
+                  if (applied && batch) await openBatch(batch.id);
+                  toast({
+                    title: "SKU pattern saved",
+                    description: applied
+                      ? `${applied.updated} unlisted book${applied.updated === 1 ? "" : "s"} got new SKUs.` +
+                        (applied.tooLong.length ? ` ${applied.tooLong.length} kept the old one (new SKU too long).` : "")
+                      : "Books scanned from now on use it.",
+                  });
                 } catch (e) {
                   toast({ title: "Couldn't save", description: (e as Error).message, variant: "destructive" });
                 }

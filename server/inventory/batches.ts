@@ -8,6 +8,7 @@ import {
   DEFAULT_LISTING_SETTINGS,
   itemProblem,
   listingSettingsSchema,
+  MAX_SKU_LENGTH,
   suggestedAmazonPrice,
 } from "@shared/listing";
 import type {
@@ -165,6 +166,16 @@ export function deleteBatch(id: number): void {
 // ---- Books -------------------------------------------------------------------
 
 function skuFor(item: Pick<BatchItemRow, "seq" | "createdAt" | "condition" | "amazonPrice" | "isbn13" | "amazon" | "batchId" | "box">): string {
+  const sku = buildSkuFor(item);
+  if (sku.length > MAX_SKU_LENGTH) {
+    throw new BatchError(
+      `SKU ${sku} is ${sku.length} characters; Amazon allows ${MAX_SKU_LENGTH}. Use a shorter box name or SKU pattern.`,
+    );
+  }
+  return sku;
+}
+
+function buildSkuFor(item: Pick<BatchItemRow, "seq" | "createdAt" | "condition" | "amazonPrice" | "isbn13" | "amazon" | "batchId" | "box">): string {
   return buildSku(getListingSettings().skuTemplate, {
     box: item.box,
     seq: item.seq,
@@ -240,6 +251,28 @@ export function updateItem(id: number, patch: BatchItemPatch): BatchItem {
     .returning()
     .get();
   return toItem(updated);
+}
+
+// After the SKU pattern changes: gives every book not yet listed anywhere a
+// SKU in the new pattern. Returns how many changed, and any left as they were
+// because the new SKU would be too long.
+export function applyPatternToUnlisted(): { updated: number; tooLong: string[] } {
+  const rows = db.select().from(batchItems).where(sql`${batchItems.status} != 'listed'`).all();
+  let updated = 0;
+  const tooLong: string[] = [];
+  for (const row of rows) {
+    if (parseJson<ListResult>(row.amazonResult)?.ok || parseJson<ListResult>(row.ebayResult)?.ok) continue;
+    if (getRow(row.batchId).status === "listing") continue;
+    const sku = buildSkuFor(row);
+    if (sku.length > MAX_SKU_LENGTH) {
+      tooLong.push(row.sku);
+      continue;
+    }
+    if (sku === row.sku) continue;
+    db.update(batchItems).set({ sku }).where(eq(batchItems.id, row.id)).run();
+    updated++;
+  }
+  return { updated, tooLong };
 }
 
 export function deleteItem(id: number): void {
