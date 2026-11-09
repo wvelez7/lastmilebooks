@@ -54,6 +54,53 @@ function priceOrNull(draft: string): number | null {
   return draft.trim() !== "" && Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
 }
 
+// The box new scans go into. Change it when you start filling a new box; books
+// already scanned keep theirs.
+export function BoxField({
+  batch,
+  api,
+  onBatchChange,
+}: {
+  batch: BatchDetail;
+  api: Api;
+  onBatchChange: (batch: BatchDetail) => void;
+}) {
+  const { toast } = useToast();
+  const [draft, setDraft] = useState(batch.defaults.box);
+  useEffect(() => setDraft(batch.defaults.box), [batch.defaults.box]);
+
+  async function save() {
+    const box = draft.trim().toUpperCase();
+    if (box === batch.defaults.box) return;
+    try {
+      const updated = await api("PUT", `/api/batches/${batch.id}`, { defaults: { ...batch.defaults, box } });
+      onBatchChange({ ...batch, ...updated, items: batch.items });
+      toast({ title: box ? `Now scanning into box ${box}` : "No box set" });
+    } catch (e) {
+      setDraft(batch.defaults.box);
+      toast({ title: "Couldn't change box", description: (e as Error).message, variant: "destructive" });
+    }
+  }
+
+  return (
+    <label className="flex flex-none items-center gap-2 text-sm">
+      Box
+      <Input
+        value={draft}
+        maxLength={8}
+        placeholder="—"
+        onChange={(e) => setDraft(e.target.value.toUpperCase())}
+        onBlur={() => void save()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        }}
+        className="h-8 w-20 font-mono uppercase"
+        data-testid="input-box"
+      />
+    </label>
+  );
+}
+
 // What other sellers ask, and where to look further.
 export function Research({ isbn13, book }: { isbn13: string; book: AmazonBook | null }) {
   return (
@@ -132,6 +179,7 @@ export function BatchItemEditor({
   const [ebayDraft, setEbayDraft] = useState(item.ebayPrice?.toFixed(2) ?? "");
   const [noteDraft, setNoteDraft] = useState(item.note);
   const [qtyDraft, setQtyDraft] = useState(String(item.quantity));
+  const [boxDraft, setBoxDraft] = useState(item.box);
   const locked = item.status === "listed";
 
   useEffect(() => {
@@ -139,7 +187,8 @@ export function BatchItemEditor({
     setEbayDraft(item.ebayPrice?.toFixed(2) ?? "");
     setNoteDraft(item.note);
     setQtyDraft(String(item.quantity));
-  }, [item.amazonPrice, item.ebayPrice, item.note, item.quantity]);
+    setBoxDraft(item.box);
+  }, [item.amazonPrice, item.ebayPrice, item.note, item.quantity, item.box]);
 
   async function save(patch: BatchItemPatch) {
     try {
@@ -207,7 +256,19 @@ export function BatchItemEditor({
           <div className={profitClass(ebayProfit)}>{ebayProfit === null ? "" : `${money(ebayProfit)} profit`}</div>
         </div>
       </div>
-      <div className="grid grid-cols-[1fr_4.5rem] gap-3">
+      <div className="grid grid-cols-[5.5rem_1fr_4.5rem] gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Box</Label>
+          <Input
+            value={boxDraft}
+            maxLength={8}
+            disabled={locked}
+            onChange={(e) => setBoxDraft(e.target.value.toUpperCase())}
+            onBlur={() => boxDraft.trim() !== item.box && void save({ box: boxDraft.trim() })}
+            className="font-mono uppercase"
+            data-testid={`input-box-${item.id}`}
+          />
+        </div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Condition</Label>
           <select
@@ -307,6 +368,7 @@ function BatchRow(props: Parameters<typeof BatchItemEditor>[0]) {
         <span className="min-w-0 flex-1">
           <span className="line-clamp-2 text-sm font-medium">{item.title}</span>
           <span className="block text-xs text-muted-foreground">
+            {item.box && <span className="font-medium text-foreground">Box {item.box} · </span>}
             {item.sku} · {conditionLabel(item.condition)}
             {item.amazon?.salesRank ? ` · #${item.amazon.salesRank.toLocaleString()}` : ""}
           </span>
@@ -340,7 +402,8 @@ function DefaultsForm({
   return (
     <details className="rounded-md border p-3 text-sm">
       <summary className="cursor-pointer font-medium">
-        New books: {conditionLabel(defaults.condition)}, qty {defaults.quantity},{" "}
+        New books: {defaults.box ? `box ${defaults.box}, ` : ""}
+        {conditionLabel(defaults.condition)}, qty {defaults.quantity},{" "}
         {[defaults.amazon && "Amazon", defaults.ebay && "eBay"].filter(Boolean).join(" + ") || "nowhere"}
       </summary>
       <div className="mt-3 space-y-3">
@@ -482,7 +545,7 @@ export function BatchTab({
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         <select
           value={batch.id}
           onChange={(e) => onSelect(Number(e.target.value))}
@@ -499,6 +562,8 @@ export function BatchTab({
           New
         </Button>
       </div>
+
+      {!listing && <BoxField batch={batch} api={api} onBatchChange={onBatchChange} />}
 
       <DefaultsForm
         defaults={batch.defaults}

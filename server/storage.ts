@@ -109,6 +109,7 @@ sqlite.exec(`
     amazon TEXT,
     ebay_lowest REAL,
     on_ebay_already INTEGER NOT NULL DEFAULT 0,
+    box TEXT NOT NULL DEFAULT '',
     condition TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '',
     quantity INTEGER NOT NULL DEFAULT 1,
@@ -132,6 +133,7 @@ function addColumn(table: string, column: string, type: string) {
 }
 addColumn("inventory_items", "amazon_sku", "TEXT");
 addColumn("supplies", "takes_turns", "INTEGER NOT NULL DEFAULT 0");
+addColumn("batch_items", "box", "TEXT NOT NULL DEFAULT ''");
 
 export const db = drizzle(sqlite);
 

@@ -186,6 +186,7 @@ export const batchItems = sqliteTable("batch_items", {
   amazon: text("amazon"), // AmazonBook snapshot, null if not on Amazon
   ebayLowest: real("ebay_lowest"),
   onEbayAlready: integer("on_ebay_already").notNull().default(0),
+  box: text("box").notNull().default(""), // where the book is stored, for the {BOX} in its SKU
   condition: text("condition").notNull(),
   note: text("note").notNull().default(""),
   quantity: integer("quantity").notNull().default(1),

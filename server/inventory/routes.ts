@@ -278,7 +278,8 @@ export function registerInventoryRoutes(app: Express) {
       .replace(/\{PRICE\}/g, "99999")
       .replace(/\{ISBN\}/g, "9780000000000")
       .replace(/\{ASIN\}/g, "B000000000")
-      .replace(/\{BATCH\}/g, "9999");
+      .replace(/\{BATCH\}/g, "9999")
+      .replace(/\{BOX\}/g, "BOX12345");
     if (longest.length > MAX_SKU_LENGTH) {
       return res.status(400).json({ error: `That pattern can make SKUs over Amazon's ${MAX_SKU_LENGTH} characters` });
     }

@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { BatchItemEditor, BatchTab, Research, SkuSettingsForm } from "./ScanBatch";
+import { BatchItemEditor, BatchTab, BoxField, Research, SkuSettingsForm } from "./ScanBatch";
 import type { Api, BatchesResponse } from "./ScanBatch";
 
 // Phone page for checking books against the eBay store and Amazon's prices,
@@ -858,6 +858,9 @@ export default function Scan() {
               Add every scan
             </label>
           </div>
+          {batch && batch.status !== "listing" && (
+            <BoxField batch={batch} api={api} onBatchChange={(next) => setBatch(next)} />
+          )}
 
           <CameraScanner onCode={(c) => void scan(c)} />
 

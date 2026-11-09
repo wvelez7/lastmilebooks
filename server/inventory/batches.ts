@@ -80,6 +80,7 @@ function toItem(row: BatchItemRow): BatchItem {
     amazon: parseJson<AmazonBook>(row.amazon),
     ebayLowest: row.ebayLowest,
     onEbayAlready: row.onEbayAlready,
+    box: row.box,
     condition: row.condition as BookCondition,
     note: row.note,
     quantity: row.quantity,
@@ -163,8 +164,9 @@ export function deleteBatch(id: number): void {
 
 // ---- Books -------------------------------------------------------------------
 
-function skuFor(item: Pick<BatchItemRow, "seq" | "createdAt" | "condition" | "amazonPrice" | "isbn13" | "amazon" | "batchId">): string {
+function skuFor(item: Pick<BatchItemRow, "seq" | "createdAt" | "condition" | "amazonPrice" | "isbn13" | "amazon" | "batchId" | "box">): string {
   return buildSku(getListingSettings().skuTemplate, {
+    box: item.box,
     seq: item.seq,
     scannedAt: item.createdAt,
     condition: item.condition as BookCondition,
@@ -201,6 +203,7 @@ export function addItem(batchId: number, code: string, info: ScanInfo, amazonSet
     amazon: info.amazon ? JSON.stringify(info.amazon) : null,
     ebayLowest: info.ebayLowest,
     onEbayAlready: info.onEbayAlready,
+    box: d.box,
     condition: d.condition,
     note: d.note,
     quantity: d.quantity,

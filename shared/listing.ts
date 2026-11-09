@@ -85,6 +85,7 @@ export function researchLinks(isbn13: string, asin: string | null) {
 
 export const SKU_TOKENS = [
   { token: "{SEQ}", meaning: "running number, never repeats (required)" },
+  { token: "{BOX}", meaning: "the box the book is stored in" },
   { token: "{DATE}", meaning: "date scanned, like 261109" },
   { token: "{COND}", meaning: "condition: N, LN, VG, G or A" },
   { token: "{PRICE}", meaning: "Amazon price in cents, like 709" },
@@ -93,7 +94,16 @@ export const SKU_TOKENS = [
   { token: "{BATCH}", meaning: "batch number" },
 ] as const;
 
-export const DEFAULT_SKU_TEMPLATE = "LMB-{DATE}-{COND}-{SEQ}";
+// Box first, so a sold book's SKU says where to find it.
+export const DEFAULT_SKU_TEMPLATE = "{BOX}-{DATE}-{COND}-{SEQ}";
+
+// A box label: short so the SKU stays short, and only characters SKUs allow.
+export const boxSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .max(8, "Keep box names to 8 characters")
+  .regex(/^[A-Z0-9_.-]*$/, "Use only letters, numbers, - _ and .");
 export const MAX_SKU_LENGTH = 40; // Amazon's limit
 
 export const listingSettingsSchema = z.object({
@@ -116,6 +126,7 @@ export interface SkuParts {
   isbn13: string;
   asin: string | null;
   batchId: number;
+  box: string;
 }
 
 export function buildSku(template: string, p: SkuParts): string {
@@ -129,13 +140,20 @@ export function buildSku(template: string, p: SkuParts): string {
     "{ISBN}": p.isbn13,
     "{ASIN}": p.asin ?? "",
     "{BATCH}": String(p.batchId),
+    "{BOX}": p.box,
   };
-  return template.replace(/\{[A-Z]+\}/g, (t) => values[t] ?? t).slice(0, MAX_SKU_LENGTH);
+  // An empty token (no box yet) would leave "--"; close the gap instead.
+  return template
+    .replace(/\{[A-Z]+\}/g, (t) => values[t] ?? t)
+    .replace(/([-_.])[-_.]+/g, "$1")
+    .replace(/^[-_.]+|[-_.]+$/g, "")
+    .slice(0, MAX_SKU_LENGTH);
 }
 
 // ---- Batches -------------------------------------------------------------------
 
 export const batchDefaultsSchema = z.object({
+  box: boxSchema.default(""), // box new scans go into; change it when you start a new box
   condition: z.enum(conditionValues),
   note: z.string().trim().max(1000),
   quantity: z.number().int().min(1).max(99),
@@ -146,6 +164,7 @@ export const batchDefaultsSchema = z.object({
 export type BatchDefaults = z.infer<typeof batchDefaultsSchema>;
 
 export const DEFAULT_BATCH_DEFAULTS: BatchDefaults = {
+  box: "",
   condition: "good",
   note: "",
   quantity: 1,
@@ -159,6 +178,7 @@ const price = z.number().min(MIN_PRICE, `Price must be at least $${MIN_PRICE}`).
 export const batchItemPatchSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
+    box: boxSchema,
     condition: z.enum(conditionValues),
     note: z.string().trim().max(1000),
     quantity: z.number().int().min(1).max(99),
@@ -189,6 +209,7 @@ export interface BatchItem {
   amazon: AmazonBook | null; // snapshot from when it was scanned
   ebayLowest: number | null; // cheapest fixed-price eBay listing, item price only
   onEbayAlready: number; // copies already in your eBay store
+  box: string; // where the book is stored
   condition: BookCondition;
   note: string;
   quantity: number;
