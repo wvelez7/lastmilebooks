@@ -68,14 +68,17 @@ export async function registerRoutes(
 }
 
 // Fire-and-forget: a calendar failure never fails the pickup request.
-async function syncPickupToCalendar(r: PickupRequest): Promise<void> {
+async function syncPickupToCalendar(r: PickupRequest): Promise<boolean> {
   try {
     const sameDay = await storage.listPickupsOnDate(r.preferredDate);
     const earlier = sameDay.filter((o) => o.id < r.id);
     const eventId = await addPickupToCalendar(r, earlier);
-    if (eventId) await storage.setCalendarEventId(r.id, eventId);
+    if (!eventId) return false;
+    await storage.setCalendarEventId(r.id, eventId);
+    return true;
   } catch (e) {
     console.error(`[calendar] pickup #${r.id}:`, e);
+    return false;
   }
 }
 
@@ -85,6 +88,9 @@ async function addUpcomingPickupsToCalendar() {
   if (!calendarConfigured()) return;
   const today = new Date().toISOString().slice(0, 10);
   const missing = await storage.listUpcomingPickupsMissingFromCalendar(today);
-  for (const r of missing) await syncPickupToCalendar(r);
-  if (missing.length) console.log(`[calendar] added ${missing.length} upcoming pickup(s)`);
+  let added = 0;
+  for (const r of missing) if (await syncPickupToCalendar(r)) added++;
+  if (missing.length) {
+    console.log(`[calendar] added ${added} of ${missing.length} upcoming pickup(s)`);
+  }
 }
