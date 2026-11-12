@@ -91,6 +91,16 @@ sqlite.exec(`
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS supply_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    supply_id INTEGER NOT NULL,
+    supply_name TEXT NOT NULL,
+    change INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS listing_batches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,

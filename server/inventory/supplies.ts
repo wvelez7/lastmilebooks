@@ -1,6 +1,6 @@
-import { isLowOnSupply, supplies } from "@shared/schema";
-import type { Supply, UpsertSupply } from "@shared/schema";
-import { asc, eq, gt, inArray, isNotNull, sql, and } from "drizzle-orm";
+import { isLowOnSupply, supplies, supplyHistory } from "@shared/schema";
+import type { Supply, SupplyHistoryRow, UpsertSupply } from "@shared/schema";
+import { asc, desc, eq, gt, inArray, isNotNull, sql, and } from "drizzle-orm";
 import { db } from "../storage";
 import { sendTeamAlert } from "../email";
 import { inventoryStore } from "./store";
@@ -14,17 +14,41 @@ export function listSupplies(): Supply[] {
   return db.select().from(supplies).orderBy(asc(supplies.name)).all();
 }
 
+function getSupply(id: number): Supply | undefined {
+  return db.select().from(supplies).where(eq(supplies.id, id)).get();
+}
+
+// Writes a history row when the count actually moved. Callers read `before`
+// and write the change with no await in between, so rows can't interleave.
+function recordChange(before: number, after: Supply, reason: string): void {
+  const change = after.quantity - before;
+  if (change === 0) return;
+  db.insert(supplyHistory)
+    .values({ supplyId: after.id, supplyName: after.name, change, quantity: after.quantity, reason })
+    .run();
+}
+
+export function listSupplyHistory(limit = 200): SupplyHistoryRow[] {
+  return db.select().from(supplyHistory).orderBy(desc(supplyHistory.id)).limit(limit).all();
+}
+
 export function createSupply(data: UpsertSupply): Supply {
-  return db.insert(supplies).values(data).returning().get();
+  const supply = db.insert(supplies).values(data).returning().get();
+  recordChange(0, supply, "Added");
+  return supply;
 }
 
 export function updateSupply(id: number, data: UpsertSupply): Supply | undefined {
-  return db
+  const before = getSupply(id);
+  if (!before) return undefined;
+  const supply = db
     .update(supplies)
     .set({ ...data, updatedAt: new Date().toISOString() })
     .where(eq(supplies.id, id))
     .returning()
     .get();
+  if (supply) recordChange(before.quantity, supply, "Count edited");
+  return supply;
 }
 
 export function deleteSupply(id: number): boolean {
@@ -32,8 +56,10 @@ export function deleteSupply(id: number): boolean {
 }
 
 // Atomic so a sale and a hand count can't both read the old quantity.
-export function adjustSupply(id: number, by: number): Supply | undefined {
-  return db
+export function adjustSupply(id: number, by: number, reason = "Changed by hand"): Supply | undefined {
+  const before = getSupply(id);
+  if (!before) return undefined;
+  const supply = db
     .update(supplies)
     .set({
       quantity: sql`max(0, ${supplies.quantity} + ${by})`,
@@ -42,6 +68,8 @@ export function adjustSupply(id: number, by: number): Supply | undefined {
     .where(eq(supplies.id, id))
     .returning()
     .get();
+  if (supply) recordChange(before.quantity, supply, reason);
+  return supply;
 }
 
 export function markOrdered(id: number): Supply | undefined {
@@ -65,7 +93,9 @@ export function cancelOrder(id: number): Supply | undefined {
 
 // Only matches while an order is open, so a double tap can't add it twice.
 export function markReceived(id: number): Supply | undefined {
-  return db
+  const before = getSupply(id);
+  if (!before) return undefined;
+  const supply = db
     .update(supplies)
     .set({
       quantity: sql`${supplies.quantity} + ${supplies.orderedQuantity}`,
@@ -77,6 +107,8 @@ export function markReceived(id: number): Supply | undefined {
     .where(and(eq(supplies.id, id), isNotNull(supplies.orderedQuantity)))
     .returning()
     .get();
+  if (supply) recordChange(before.quantity, supply, "Received order");
+  return supply;
 }
 
 // One email covering everything newly low. Clears the mark first so a supply
@@ -114,13 +146,23 @@ export async function alertLowSupplies(): Promise<void> {
 
 const TURN_KEY = "supplies_last_turn"; // id of the supply the last order used
 
+const MARKETPLACE_NAMES: Record<string, string> = { ebay: "eBay", whatnot: "Whatnot", amazon: "Amazon" };
+
+// "ebay:12-34567-89" -> "eBay order 12-34567-89"
+function orderReason(orderKey: string): string {
+  const split = orderKey.indexOf(":");
+  const platform = orderKey.slice(0, split);
+  return `${MARKETPLACE_NAMES[platform] ?? platform} order ${orderKey.slice(split + 1)}`;
+}
+
 // `orderKey` is "<platform>:<order id>". Claimed once per order, not per line,
 // because several books in one order share a package.
 export async function useSuppliesForOrder(orderKey: string): Promise<void> {
   if (!inventoryStore.claimSale(`supplies:${orderKey}`)) return;
+  const reason = orderReason(orderKey);
   const used = listSupplies().filter((s) => s.usedPerOrder > 0);
   for (const supply of used) {
-    if (!supply.takesTurns) adjustSupply(supply.id, -supply.usedPerOrder);
+    if (!supply.takesTurns) adjustSupply(supply.id, -supply.usedPerOrder, reason);
   }
   // Supplies that take turns: this order uses the one after the last one used.
   // No await between reading and saving the turn, so overlapping orders can't
@@ -129,7 +171,7 @@ export async function useSuppliesForOrder(orderKey: string): Promise<void> {
   if (turns.length > 0) {
     const last = Number(inventoryStore.getState(TURN_KEY) ?? 0);
     const next = turns.find((s) => s.id > last) ?? turns[0];
-    adjustSupply(next.id, -next.usedPerOrder);
+    adjustSupply(next.id, -next.usedPerOrder, reason);
     inventoryStore.setState(TURN_KEY, String(next.id));
   }
   await alertLowSupplies();

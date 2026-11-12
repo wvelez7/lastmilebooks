@@ -375,6 +375,7 @@ export function registerInventoryRoutes(app: Express) {
         },
       ],
       supplies: supplies.listSupplies(),
+      history: supplies.listSupplyHistory(),
     });
   });
 

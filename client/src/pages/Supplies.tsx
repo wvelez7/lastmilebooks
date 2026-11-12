@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { isLowOnSupply } from "@shared/schema";
-import type { Supply } from "@shared/schema";
+import type { Supply, SupplyHistoryRow } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +63,7 @@ export default function Supplies() {
   const [keyDraft, setKeyDraft] = useState("");
   const [rows, setRows] = useState<Supply[] | null>(null);
   const [sources, setSources] = useState<OrderSource[]>([]);
+  const [history, setHistory] = useState<SupplyHistoryRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -102,6 +103,7 @@ export default function Supplies() {
       const data = await api("GET", "/api/supplies");
       setRows(data.supplies);
       setSources(data.sources);
+      setHistory(data.history ?? []);
     } catch (e) {
       toast({ title: "Couldn't load supplies", description: (e as Error).message, variant: "destructive" });
     }
@@ -435,6 +437,38 @@ export default function Supplies() {
             {rows?.length === 0 && (
               <p className="py-6 text-center text-sm text-muted-foreground">
                 No supplies yet. Add your mailers, tape and labels to start tracking them.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">History</CardTitle>
+          </CardHeader>
+          <CardContent className="divide-y">
+            {history.map((h) => (
+              <div key={h.id} className="flex items-baseline justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0">
+                <div className="min-w-0">
+                  <div>
+                    <span className="font-medium">{h.supplyName}</span>
+                    <span className="text-muted-foreground"> · {h.reason}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground tabular-nums">
+                    {new Date(h.createdAt.includes("T") ? h.createdAt : `${h.createdAt}Z`).toLocaleString()}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right tabular-nums">
+                  <span className={h.change < 0 ? "text-destructive" : "text-green-700"}>
+                    {h.change > 0 ? `+${h.change}` : `−${Math.abs(h.change)}`}
+                  </span>
+                  <span className="text-muted-foreground"> → {h.quantity}</span>
+                </div>
+              </div>
+            ))}
+            {history.length === 0 && (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No changes yet. Every count change from orders, + and −, edits and deliveries shows here.
               </p>
             )}
           </CardContent>

@@ -164,6 +164,22 @@ export function isLowOnSupply(s: Pick<Supply, "quantity" | "reorderAt">): boolea
   return s.quantity <= s.reorderAt;
 }
 
+// Every change to a supply's count, newest shown first on /#/supplies. The name
+// is copied so rows still read right after a supply is renamed or removed.
+export const supplyHistory = sqliteTable("supply_history", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  supplyId: integer("supply_id").notNull(),
+  supplyName: text("supply_name").notNull(),
+  change: integer("change").notNull(),
+  quantity: integer("quantity").notNull(), // count after the change
+  reason: text("reason").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export type SupplyHistoryRow = typeof supplyHistory.$inferSelect;
+
 // Books scanned for listing (/#/scan, Batch tab). JSON columns hold the
 // shapes in shared/listing.ts.
 export const listingBatches = sqliteTable("listing_batches", {
