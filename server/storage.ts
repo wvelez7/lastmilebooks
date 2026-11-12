@@ -146,6 +146,7 @@ addColumn("inventory_items", "amazon_sku", "TEXT");
 addColumn("supplies", "takes_turns", "INTEGER NOT NULL DEFAULT 0");
 addColumn("batch_items", "box", "TEXT NOT NULL DEFAULT ''");
 addColumn("batch_items", "label_printed_at", "TEXT");
+addColumn("pickup_requests", "photo", "TEXT");
 
 export const db = drizzle(sqlite);
 

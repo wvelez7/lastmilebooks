@@ -62,7 +62,8 @@ export async function sendPickupRequestEmail(
       ownerSubject,
       ownerText,
       ownerHtml,
-      req.email ? [req.email] : REPLY_TO
+      req.email ? [req.email] : REPLY_TO,
+      photoAttachments(req)
     );
     // Send customer confirmation (best-effort; owner notification is primary)
     if (req.email) {
@@ -84,7 +85,8 @@ export async function sendPickupRequestEmail(
       ownerSubject,
       ownerText,
       ownerHtml,
-      req.email ? [req.email] : REPLY_TO
+      req.email ? [req.email] : REPLY_TO,
+      photoAttachments(req)
     );
     if (req.email) {
       await sendWithSendGrid(
@@ -117,6 +119,7 @@ function renderOwnerText(r: PickupRequest): string {
     `Boxes:    ${r.numberOfBoxes}`,
     `Date:     ${r.preferredDate}`,
     `Notes:    ${r.notes || "(none)"}`,
+    `Photo:    ${r.photo ? "attached" : "(none)"}`,
     ``,
     `Submitted: ${r.createdAt}`,
   ].join("\n");
@@ -142,6 +145,7 @@ function renderOwnerHtml(r: PickupRequest): string {
           ${row("Boxes", r.numberOfBoxes)}
           ${row("Preferred date", r.preferredDate)}
           ${row("Notes", r.notes || "(none)")}
+          ${row("Photo", r.photo ? "Attached to this email" : "(none)")}
         </table>
       </div>
       <div style="padding:12px 24px;background:#FBF8F0;color:#5C6359;font-size:12px;border-top:1px solid #DCD5C2;">
@@ -226,6 +230,16 @@ export async function sendTeamAlert(
   return { ok: false, status: "no_provider_configured" };
 }
 
+type Attachment = { filename: string; type: string; content: string }; // content is base64
+
+// The donation photo, from its data URL, as an email attachment.
+function photoAttachments(r: PickupRequest): Attachment[] {
+  const m = r.photo?.match(/^data:(image\/(jpeg|png|webp));base64,(.+)$/);
+  if (!m) return [];
+  const ext = m[2] === "jpeg" ? "jpg" : m[2];
+  return [{ filename: `donation-photo-${r.id}.${ext}`, type: m[1], content: m[3] }];
+}
+
 // "Name <addr@x.com>" -> { email, name }; SendGrid rejects the combined form.
 function parseAddress(addr: string): { email: string; name?: string } {
   const m = addr.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
@@ -247,7 +261,8 @@ async function sendWithResend(
   subject: string,
   text: string,
   html: string,
-  replyTo: string[]
+  replyTo: string[],
+  attachments: Attachment[] = []
 ): Promise<{ ok: boolean; status: string }> {
   try {
     const res = await fetch("https://api.resend.com/emails", {
@@ -263,6 +278,12 @@ async function sendWithResend(
         subject,
         text,
         html,
+        ...(attachments.length && {
+          attachments: attachments.map((a) => ({
+            filename: a.filename,
+            content: a.content,
+          })),
+        }),
       }),
     });
     if (!res.ok) {
@@ -282,7 +303,8 @@ async function sendWithSendGrid(
   subject: string,
   text: string,
   html: string,
-  replyTo: string[]
+  replyTo: string[],
+  attachments: Attachment[] = []
 ): Promise<{ ok: boolean; status: string }> {
   try {
     const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
@@ -300,6 +322,14 @@ async function sendWithSendGrid(
           { type: "text/plain", value: text },
           { type: "text/html", value: html },
         ],
+        ...(attachments.length && {
+          attachments: attachments.map((a) => ({
+            content: a.content,
+            filename: a.filename,
+            type: a.type,
+            disposition: "attachment",
+          })),
+        }),
       }),
     });
     if (!res.ok) {

@@ -12,6 +12,8 @@ export const pickupRequests = sqliteTable("pickup_requests", {
   numberOfBoxes: text("number_of_boxes").notNull(),
   preferredDate: text("preferred_date").notNull(),
   notes: text("notes"),
+  // Optional photo of the donation, as a data URL (resized in the browser).
+  photo: text("photo"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
@@ -27,6 +29,10 @@ export function isPickupDay(value: string): boolean {
   return PICKUP_WEEKDAYS.includes(day);
 }
 
+// The browser resizes photos to about 1600px JPEG (a few hundred KB), so this
+// only stops oversized uploads.
+export const MAX_PICKUP_PHOTO_CHARS = 4_000_000;
+
 export const insertPickupRequestSchema = createInsertSchema(pickupRequests, {
   fullName: (s) => s.min(2, "Please enter your full name"),
   email: (s) => s.email("Please enter a valid email"),
@@ -38,6 +44,12 @@ export const insertPickupRequestSchema = createInsertSchema(pickupRequests, {
     s
       .min(1, "Pick a preferred date")
       .refine(isPickupDay, "Pickups are only available on Tuesdays and Wednesdays"),
+  photo: (s) =>
+    s
+      .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, "Please upload a JPG or PNG photo")
+      .max(MAX_PICKUP_PHOTO_CHARS, "That photo is too large")
+      .nullable()
+      .optional(),
 }).omit({ id: true, createdAt: true, emailStatus: true });
 
 export type InsertPickupRequest = z.infer<typeof insertPickupRequestSchema>;

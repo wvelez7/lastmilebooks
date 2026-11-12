@@ -16,6 +16,7 @@ declare module "http" {
 
 app.use(
   express.json({
+    limit: "8mb", // pickup requests can carry a photo
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },

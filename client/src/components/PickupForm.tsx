@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, ImagePlus, X } from "lucide-react";
 
 const BOX_OPTIONS = [
   "1–2 boxes",
@@ -35,6 +35,34 @@ const BOX_OPTIONS = [
   "11–20 boxes",
   "21+ boxes",
 ];
+
+const CITY_SUGGESTIONS = ["Temecula", "Murrieta", "Menifee", "Palm Springs"];
+
+const PHOTO_MAX_SIDE = 1600;
+
+// Shrink a phone photo to a JPEG data URL small enough to upload and email.
+function resizePhoto(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("no canvas"));
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.8));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("unreadable image"));
+    };
+    img.src = url;
+  });
+}
 
 const WEEKS_AHEAD = 8;
 
@@ -75,8 +103,10 @@ export function PickupForm() {
       numberOfBoxes: "",
       preferredDate: "",
       notes: "",
+      photo: null,
     },
   });
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const mutation = useMutation({
     mutationFn: async (data: InsertPickupRequest) => {
@@ -188,12 +218,18 @@ export function PickupForm() {
                 <FormLabel>City</FormLabel>
                 <FormControl>
                   <Input
-                    placeholder="Murrieta, Menifee, Temecula…"
+                    placeholder="Temecula, Murrieta, Menifee, Palm Springs…"
                     autoComplete="address-level2"
+                    list="city-suggestions"
                     {...field}
                     data-testid="input-city"
                   />
                 </FormControl>
+                <datalist id="city-suggestions">
+                  {CITY_SUGGESTIONS.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
                 <FormMessage />
               </FormItem>
             )}
@@ -294,6 +330,71 @@ export function PickupForm() {
                   data-testid="input-notes"
                 />
               </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="photo"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Photo of your donation (optional)</FormLabel>
+              {field.value ? (
+                <div className="space-y-2">
+                  <img
+                    src={field.value}
+                    alt="Your donation"
+                    className="max-h-48 rounded-md border border-border"
+                    data-testid="img-photo-preview"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => field.onChange(null)}
+                    data-testid="button-remove-photo"
+                  >
+                    <X className="mr-1 h-4 w-4" />
+                    Remove photo
+                  </Button>
+                </div>
+              ) : (
+                <FormControl>
+                  <label className="flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-border px-4 py-5 text-sm text-muted-foreground hover:bg-muted/40">
+                    <ImagePlus className="h-5 w-5" />
+                    <span>Add a photo of your books or boxes</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      data-testid="input-photo"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!file) return;
+                        setPhotoError(null);
+                        try {
+                          field.onChange(await resizePhoto(file));
+                        } catch {
+                          setPhotoError(
+                            "We couldn't read that photo. Please try a JPG or PNG."
+                          );
+                        }
+                      }}
+                    />
+                  </label>
+                </FormControl>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Helps us bring the right vehicle. Not required.
+              </p>
+              {photoError && (
+                <p className="text-sm font-medium text-destructive">
+                  {photoError}
+                </p>
+              )}
               <FormMessage />
             </FormItem>
           )}
