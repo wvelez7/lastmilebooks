@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { forgetAdminKey, readAdminKey, saveAdminKey } from "@/lib/adminKey";
 import {
   BatchItemEditor,
   BatchTab,
@@ -28,11 +29,10 @@ import type { Api, BatchesResponse } from "./ScanBatch";
 
 // Phone page for checking books against the eBay store and Amazon's prices,
 // and listing them in batches (Batch tab), the way Accelerlist does.
-// Not linked from the site; open /#/scan and enter the ADMIN_KEY. Remembered on
-// the device (unlike /#/inventory) because it's opened many times a day from
-// the home screen. Works with a USB or Bluetooth scanner too.
+// Not linked from the site; open /#/scan and enter the ADMIN_KEY (shared with
+// the other admin pages, remembered on the device). Works with a USB or
+// Bluetooth scanner too.
 
-const KEY_STORAGE = "lmb-scan-key";
 const BATCH_STORAGE = "lmb-scan-batch";
 const AUTO_ADD_STORAGE = "lmb-scan-auto-add";
 const RESCAN_MS = 3000; // ignore the same barcode while it's still in frame
@@ -81,19 +81,9 @@ function writeStored(key: string, value: string | null) {
   } catch {}
 }
 
-function readKey(): string {
-  try {
-    return localStorage.getItem(KEY_STORAGE) ?? "";
-  } catch {
-    return "";
-  }
-}
-
 function writeKey(key: string) {
-  try {
-    if (key) localStorage.setItem(KEY_STORAGE, key);
-    else localStorage.removeItem(KEY_STORAGE);
-  } catch {}
+  if (key) saveAdminKey(key);
+  else forgetAdminKey();
 }
 
 function money(n: number): string {
@@ -618,7 +608,7 @@ function SettingsForm({
 
 export default function Scan() {
   const { toast } = useToast();
-  const [adminKey, setAdminKey] = useState(readKey);
+  const [adminKey, setAdminKey] = useState(readAdminKey);
   const [keyDraft, setKeyDraft] = useState("");
   const [data, setData] = useState<ListingsResponse | null>(null);
   const [typed, setTyped] = useState("");

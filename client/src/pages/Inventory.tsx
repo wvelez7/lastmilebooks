@@ -5,11 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { forgetAdminKey, readAdminKey, saveAdminKey } from "@/lib/adminKey";
 
 // Admin page for the Whatnot + eBay inventory sync. Not linked from the site;
-// open /#/inventory and enter the ADMIN_KEY.
-
-const KEY_STORAGE = "lmb-admin-key";
+// open /#/inventory and enter the ADMIN_KEY (remembered on the device).
 
 interface InventoryResponse {
   status: { whatnot: boolean; whatnotWebhook: boolean; ebayApp: boolean; ebay: boolean };
@@ -17,19 +16,11 @@ interface InventoryResponse {
   events: SyncEvent[];
 }
 
-function readKey(): string {
-  try {
-    return sessionStorage.getItem(KEY_STORAGE) ?? "";
-  } catch {
-    return "";
-  }
-}
-
 const emptyForm = { sku: "", title: "", quantity: "1", whatnotVariantId: "", ebayItemId: "" };
 
 export default function Inventory() {
   const { toast } = useToast();
-  const [adminKey, setAdminKey] = useState(readKey);
+  const [adminKey, setAdminKey] = useState(readAdminKey);
   const [keyDraft, setKeyDraft] = useState("");
   const [data, setData] = useState<InventoryResponse | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -45,9 +36,7 @@ export default function Inventory() {
       });
       if (res.status === 401) {
         setAdminKey("");
-        try {
-          sessionStorage.removeItem(KEY_STORAGE);
-        } catch {}
+        forgetAdminKey();
         throw new Error("Wrong admin key");
       }
       if (!res.ok) {
@@ -112,9 +101,7 @@ export default function Inventory() {
               className="space-y-3"
               onSubmit={(e) => {
                 e.preventDefault();
-                try {
-                  sessionStorage.setItem(KEY_STORAGE, keyDraft);
-                } catch {}
+                saveAdminKey(keyDraft);
                 setAdminKey(keyDraft);
               }}
             >

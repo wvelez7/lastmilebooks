@@ -8,11 +8,11 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { forgetAdminKey, readAdminKey, saveAdminKey } from "@/lib/adminKey";
 
 // Admin page for shipping supplies. Not linked from the site; open /#/supplies
-// and enter the ADMIN_KEY. Shares the inventory page's key for the session.
+// and enter the ADMIN_KEY (shared with the other admin pages, remembered on the device).
 
-const KEY_STORAGE = "lmb-admin-key";
 interface OrderSource {
   name: string;
   on: boolean;
@@ -28,14 +28,6 @@ function sourceStatus(s: OrderSource): { text: string; problem: boolean } {
   const ago = formatDistanceToNow(new Date(s.checkedAt), { addSuffix: true });
   const stale = Date.now() - new Date(s.checkedAt).getTime() > s.staleAfterMs;
   return { text: stale ? `no check since ${ago}` : `checked ${ago}`, problem: stale };
-}
-
-function readKey(): string {
-  try {
-    return sessionStorage.getItem(KEY_STORAGE) ?? "";
-  } catch {
-    return "";
-  }
 }
 
 const emptyForm = {
@@ -59,7 +51,7 @@ function money(n: number): string {
 
 export default function Supplies() {
   const { toast } = useToast();
-  const [adminKey, setAdminKey] = useState(readKey);
+  const [adminKey, setAdminKey] = useState(readAdminKey);
   const [keyDraft, setKeyDraft] = useState("");
   const [rows, setRows] = useState<Supply[] | null>(null);
   const [sources, setSources] = useState<OrderSource[]>([]);
@@ -79,9 +71,7 @@ export default function Supplies() {
       });
       if (res.status === 401) {
         setAdminKey("");
-        try {
-          sessionStorage.removeItem(KEY_STORAGE);
-        } catch {}
+        forgetAdminKey();
         throw new Error("Wrong admin key");
       }
       if (!res.ok) {
@@ -185,9 +175,7 @@ export default function Supplies() {
               className="space-y-3"
               onSubmit={(e) => {
                 e.preventDefault();
-                try {
-                  sessionStorage.setItem(KEY_STORAGE, keyDraft);
-                } catch {}
+                saveAdminKey(keyDraft);
                 setAdminKey(keyDraft);
               }}
             >
