@@ -2,7 +2,7 @@ import { pickupRequests } from "@shared/schema";
 import type { PickupRequest, InsertPickupRequest } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, isNull } from "drizzle-orm";
 
 // On Render, point DATABASE_PATH at the persistent disk (see render.yaml);
 // the default local file is wiped on every deploy there.
@@ -147,6 +147,7 @@ addColumn("supplies", "takes_turns", "INTEGER NOT NULL DEFAULT 0");
 addColumn("batch_items", "box", "TEXT NOT NULL DEFAULT ''");
 addColumn("batch_items", "label_printed_at", "TEXT");
 addColumn("pickup_requests", "photo", "TEXT");
+addColumn("pickup_requests", "calendar_event_id", "TEXT");
 
 export const db = drizzle(sqlite);
 
@@ -154,6 +155,9 @@ export interface IStorage {
   createPickupRequest(req: InsertPickupRequest): Promise<PickupRequest>;
   listPickupRequests(): Promise<PickupRequest[]>;
   markEmailStatus(id: number, status: string): Promise<void>;
+  listUpcomingPickupsMissingFromCalendar(today: string): Promise<PickupRequest[]>;
+  setCalendarEventId(id: number, eventId: string): Promise<void>;
+  listPickupsOnDate(date: string): Promise<PickupRequest[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -170,6 +174,32 @@ export class DatabaseStorage implements IStorage {
   async markEmailStatus(id: number, status: string): Promise<void> {
     db.update(pickupRequests)
       .set({ emailStatus: status })
+      .where(eq(pickupRequests.id, id))
+      .run();
+  }
+  async listUpcomingPickupsMissingFromCalendar(today: string): Promise<PickupRequest[]> {
+    return db
+      .select()
+      .from(pickupRequests)
+      .where(
+        and(
+          isNull(pickupRequests.calendarEventId),
+          gte(pickupRequests.preferredDate, today)
+        )
+      )
+      .all();
+  }
+  async listPickupsOnDate(date: string): Promise<PickupRequest[]> {
+    return db
+      .select()
+      .from(pickupRequests)
+      .where(eq(pickupRequests.preferredDate, date))
+      .orderBy(pickupRequests.id)
+      .all();
+  }
+  async setCalendarEventId(id: number, eventId: string): Promise<void> {
+    db.update(pickupRequests)
+      .set({ calendarEventId: eventId })
       .where(eq(pickupRequests.id, id))
       .run();
   }

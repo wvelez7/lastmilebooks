@@ -2,8 +2,9 @@ import type { Express } from "express";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { storage } from "./storage";
-import { insertPickupRequestSchema } from "@shared/schema";
+import { insertPickupRequestSchema, type PickupRequest } from "@shared/schema";
 import { sendPickupRequestEmail } from "./email";
+import { addPickupToCalendar, calendarConfigured } from "./calendar";
 import { registerInventoryRoutes } from "./inventory/routes";
 import { startInventorySync } from "./inventory/sync";
 import { startListingRefresh } from "./inventory/listings";
@@ -31,6 +32,7 @@ export async function registerRoutes(
           console.error("[email] send error:", e);
           storage.markEmailStatus(created.id, "exception");
         });
+      syncPickupToCalendar(created);
       return res.status(201).json({ id: created.id });
     } catch (e) {
       console.error("[pickup-requests] create error:", e);
@@ -52,6 +54,10 @@ export async function registerRoutes(
     return res.json(all);
   });
 
+  addUpcomingPickupsToCalendar().catch((e) =>
+    console.error("[calendar] startup sync:", e)
+  );
+
   // Cross-marketplace inventory sync (admin page at /#/inventory)
   registerInventoryRoutes(app);
   startInventorySync();
@@ -59,4 +65,26 @@ export async function registerRoutes(
   recoverInterruptedBatches();
 
   return httpServer;
+}
+
+// Fire-and-forget: a calendar failure never fails the pickup request.
+async function syncPickupToCalendar(r: PickupRequest): Promise<void> {
+  try {
+    const sameDay = await storage.listPickupsOnDate(r.preferredDate);
+    const earlier = sameDay.filter((o) => o.id < r.id);
+    const eventId = await addPickupToCalendar(r, earlier);
+    if (eventId) await storage.setCalendarEventId(r.id, eventId);
+  } catch (e) {
+    console.error(`[calendar] pickup #${r.id}:`, e);
+  }
+}
+
+// On startup, add upcoming requests that aren't on the calendar yet (ones made
+// before the calendar was set up, or whose earlier attempt failed).
+async function addUpcomingPickupsToCalendar() {
+  if (!calendarConfigured()) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const missing = await storage.listUpcomingPickupsMissingFromCalendar(today);
+  for (const r of missing) await syncPickupToCalendar(r);
+  if (missing.length) console.log(`[calendar] added ${missing.length} upcoming pickup(s)`);
 }

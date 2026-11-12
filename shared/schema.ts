@@ -18,6 +18,7 @@ export const pickupRequests = sqliteTable("pickup_requests", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
   emailStatus: text("email_status").notNull().default("pending"),
+  calendarEventId: text("calendar_event_id"), // Google Calendar event, once added
 });
 
 // Pickups run on Tuesdays (2) and Wednesdays (3) only.
@@ -50,7 +51,7 @@ export const insertPickupRequestSchema = createInsertSchema(pickupRequests, {
       .max(MAX_PICKUP_PHOTO_CHARS, "That photo is too large")
       .nullable()
       .optional(),
-}).omit({ id: true, createdAt: true, emailStatus: true });
+}).omit({ id: true, createdAt: true, emailStatus: true, calendarEventId: true });
 
 export type InsertPickupRequest = z.infer<typeof insertPickupRequestSchema>;
 export type PickupRequest = typeof pickupRequests.$inferSelect;

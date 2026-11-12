@@ -40,6 +40,8 @@ Set these in your hosting provider (Render, Railway, Fly, etc.):
 | `EMAIL_TO` | Recommended | Extra comma-separated inboxes for new pickup requests. `thelastmilebooks@gmail.com` and `haylee@lastmilebooks.com` always receive them. |
 | `EMAIL_FROM` | Recommended | Verified sender address (e.g. `pickups@lastmilebooks.com`). Must be on a domain verified in Resend. |
 | `EMAIL_REPLY_TO` | Optional | Extra comma-separated inboxes for customer replies (`EMAIL_FROM` is send-only, so replies to it would bounce). `thelastmilebooks@gmail.com` and `haylee@lastmilebooks.com` always receive them. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Optional | Contents of a Google Cloud service account JSON key. With `GOOGLE_CALENDAR_ID`, each pickup request is added to Google Calendar on the preferred date: 2 hours for 21+ boxes, 1 hour otherwise, starting 9 AM Pacific and back-to-back for later requests that day. |
+| `GOOGLE_CALENDAR_ID` | Optional | The Google Calendar to add pickups to (Calendar settings → "Integrate calendar" → Calendar ID). Share it with the service account's email with "Make changes to events". |
 | `PORT` | Optional | Server port. Defaults to `5000`. Render sets this automatically. |
 | `NODE_ENV` | Required in prod | Set to `production`. |
 
