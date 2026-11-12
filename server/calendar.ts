@@ -17,9 +17,15 @@ import type { PickupRequest } from "@shared/schema";
 
 type ServiceAccount = { client_email: string; private_key: string };
 
+// Trimmed: values pasted into Render's dashboard can pick up stray whitespace
+// or a trailing newline, which makes Google answer "Not Found".
+function calendarId(): string {
+  return (process.env.GOOGLE_CALENDAR_ID || "").trim();
+}
+
 function serviceAccount(): ServiceAccount | null {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!raw || !process.env.GOOGLE_CALENDAR_ID) return null;
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
+  if (!raw || !calendarId()) return null;
   try {
     const sa = JSON.parse(raw);
     if (!sa.client_email || !sa.private_key) throw new Error("missing fields");
@@ -126,9 +132,8 @@ export async function addPickupToCalendar(
 ): Promise<string | null> {
   const sa = serviceAccount();
   if (!sa) return null;
-  const calendarId = encodeURIComponent(process.env.GOOGLE_CALENDAR_ID!);
   const res = await fetch(
-    `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`,
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId())}/events`,
     {
       method: "POST",
       headers: {
