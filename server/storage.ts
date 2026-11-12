@@ -2,7 +2,7 @@ import { pickupRequests } from "@shared/schema";
 import type { PickupRequest, InsertPickupRequest } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
-import { and, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull } from "drizzle-orm";
 
 // On Render, point DATABASE_PATH at the persistent disk (see render.yaml);
 // the default local file is wiped on every deploy there.
@@ -156,6 +156,7 @@ export interface IStorage {
   listPickupRequests(): Promise<PickupRequest[]>;
   markEmailStatus(id: number, status: string): Promise<void>;
   listUpcomingPickupsMissingFromCalendar(today: string): Promise<PickupRequest[]>;
+  listUpcomingPickupsOnCalendar(today: string): Promise<PickupRequest[]>;
   setCalendarEventId(id: number, eventId: string): Promise<void>;
   listPickupsOnDate(date: string): Promise<PickupRequest[]>;
 }
@@ -184,6 +185,18 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           isNull(pickupRequests.calendarEventId),
+          gte(pickupRequests.preferredDate, today)
+        )
+      )
+      .all();
+  }
+  async listUpcomingPickupsOnCalendar(today: string): Promise<PickupRequest[]> {
+    return db
+      .select()
+      .from(pickupRequests)
+      .where(
+        and(
+          isNotNull(pickupRequests.calendarEventId),
           gte(pickupRequests.preferredDate, today)
         )
       )

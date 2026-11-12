@@ -95,6 +95,11 @@ function clock(minutes: number): string {
   return `${h}:${m}:00`;
 }
 
+/** Calendar title: just "Pickup" and the city; customer details stay in the description. */
+export function pickupTitle(r: Pick<PickupRequest, "city">): string {
+  return `Pickup – ${r.city.trim()}`;
+}
+
 /**
  * @param earlierSameDay requests for the same date submitted before this one;
  * this pickup is scheduled after them.
@@ -107,7 +112,7 @@ export function pickupEvent(
     PICKUP_DAY_START + earlierSameDay.reduce((sum, e) => sum + pickupMinutes(e), 0);
   const end = start + pickupMinutes(r);
   return {
-    summary: `Pickup: ${r.fullName} — ${r.city} (${r.numberOfBoxes})`,
+    summary: pickupTitle(r),
     location: `${r.pickupAddress}, ${r.city}, CA`,
     description: [
       `Name: ${r.fullName}`,
@@ -148,4 +153,31 @@ export async function addPickupToCalendar(
   }
   const event = (await res.json()) as { id: string };
   return event.id;
+}
+
+/**
+ * Sets an existing event's title to the current format. Only the title is
+ * changed, so a time someone moved by hand on the calendar is kept.
+ */
+export async function retitlePickupOnCalendar(
+  r: PickupRequest,
+  eventId: string
+): Promise<boolean> {
+  const sa = serviceAccount();
+  if (!sa) return false;
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId())}/events/${encodeURIComponent(eventId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${await accessToken(sa)}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ summary: pickupTitle(r) }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Google Calendar update failed: ${res.status} ${await res.text()}`);
+  }
+  return true;
 }

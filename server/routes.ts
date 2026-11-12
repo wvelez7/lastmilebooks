@@ -4,7 +4,11 @@ import type { Server } from "node:http";
 import { storage } from "./storage";
 import { insertPickupRequestSchema, type PickupRequest } from "@shared/schema";
 import { sendPickupRequestEmail } from "./email";
-import { addPickupToCalendar, calendarConfigured } from "./calendar";
+import {
+  addPickupToCalendar,
+  calendarConfigured,
+  retitlePickupOnCalendar,
+} from "./calendar";
 import { registerInventoryRoutes } from "./inventory/routes";
 import { startInventorySync } from "./inventory/sync";
 import { startListingRefresh } from "./inventory/listings";
@@ -87,6 +91,21 @@ async function syncPickupToCalendar(r: PickupRequest): Promise<boolean> {
 async function addUpcomingPickupsToCalendar() {
   if (!calendarConfigured()) return;
   const today = new Date().toISOString().slice(0, 10);
+
+  // Keep titles of upcoming events in the current format ("Pickup – City").
+  const onCalendar = await storage.listUpcomingPickupsOnCalendar(today);
+  let retitled = 0;
+  for (const r of onCalendar) {
+    try {
+      if (await retitlePickupOnCalendar(r, r.calendarEventId!)) retitled++;
+    } catch (e) {
+      console.error(`[calendar] retitle pickup #${r.id}:`, e);
+    }
+  }
+  if (onCalendar.length) {
+    console.log(`[calendar] updated titles of ${retitled} of ${onCalendar.length} upcoming pickup(s)`);
+  }
+
   const missing = await storage.listUpcomingPickupsMissingFromCalendar(today);
   let added = 0;
   for (const r of missing) if (await syncPickupToCalendar(r)) added++;
