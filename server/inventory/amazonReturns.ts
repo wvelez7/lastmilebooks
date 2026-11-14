@@ -436,6 +436,50 @@ export interface ReturnsSummary {
   byMonth: { month: string; returns: number; sold: number | null }[];
   byBook: { sku: string; title: string; returns: number; sold: number | null; reasons: string[] }[];
   fbaDisposition: { disposition: string; units: number }[];
+  resold: ResoldReturn[];
+  notResold: number; // returns with no later Amazon sale of the same book
+}
+
+export interface ResoldReturn {
+  title: string;
+  reason: string;
+  returnDate: string;
+  refunded: number | null;
+  resoldOn: string;
+  resoldSku: string;
+  days: number; // from the return request to the next sale
+}
+
+// Returned books that sold again on Amazon: the next sale of the same SKU or
+// the same title (a re-scanned copy gets a new SKU) after the return was
+// requested. Each sale counts for one return only, oldest return first. A
+// later sale of the same title may be a different copy if you had two.
+export function findResold(returns: AmazonReturn[], sales: AmazonSale[]): ResoldReturn[] {
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const used = new Set<string>();
+  const byDate = [...sales].sort((a, b) => a.orderDate.localeCompare(b.orderDate));
+  return [...returns]
+    .sort((a, b) => a.returnDate.localeCompare(b.returnDate))
+    .flatMap((r) => {
+      const sale = byDate.find(
+        (s) =>
+          !used.has(s.key) &&
+          s.orderId !== r.orderId &&
+          s.orderDate >= r.returnDate &&
+          (s.sku === r.sku || norm(s.title) === norm(r.title)),
+      );
+      if (!sale) return [];
+      used.add(sale.key);
+      return [{
+        title: r.title,
+        reason: r.reason,
+        returnDate: r.returnDate,
+        refunded: r.refunded,
+        resoldOn: sale.orderDate,
+        resoldSku: sale.sku,
+        days: Math.round((Date.parse(sale.orderDate) - Date.parse(r.returnDate)) / DAY),
+      }];
+    });
 }
 
 export function summarizeReturns(rows: AmazonReturn[], sales: AmazonSale[], sinceDays?: number): ReturnsSummary {
@@ -491,6 +535,8 @@ export function summarizeReturns(rows: AmazonReturn[], sales: AmazonSale[], sinc
   const months = new Set([...returns.map((r) => r.returnDate.slice(0, 7)), ...Array.from(soldByMonth.keys())]);
   const returnsByMonth = new Map(tally(returns, (r) => r.returnDate.slice(0, 7)));
   const dates = returns.map((r) => r.returnDate).sort();
+  // All sales, not just the window: a book returned in it may sell again later.
+  const resold = findResold(returns, sales);
 
   return {
     from: dates[0] ?? null,
@@ -528,5 +574,7 @@ export function summarizeReturns(rows: AmazonReturn[], sales: AmazonSale[], sinc
       disposition,
       units: n,
     })),
+    resold: resold.sort((a, b) => b.resoldOn.localeCompare(a.resoldOn)),
+    notResold: returns.length - resold.length,
   };
 }

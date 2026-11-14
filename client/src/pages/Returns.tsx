@@ -43,6 +43,16 @@ interface Summary {
   byMonth: { month: string; returns: number; sold: number | null }[];
   byBook: { sku: string; title: string; returns: number; sold: number | null; reasons: string[] }[];
   fbaDisposition: { disposition: string; units: number }[];
+  resold: {
+    title: string;
+    reason: string;
+    returnDate: string;
+    refunded: number | null;
+    resoldOn: string;
+    resoldSku: string;
+    days: number;
+  }[];
+  notResold: number;
 }
 
 interface Job {
@@ -435,6 +445,51 @@ export default function Returns() {
                 </table>
               </CardContent>
             </Card>
+
+            {s.soldUnits !== null && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Returned, then sold again</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    {s.resold.length} of {s.resold.length + s.notResold} returned books sold again on Amazon (same SKU
+                    or same title). Sales on eBay or Whatnot aren't counted.
+                  </p>
+                </CardHeader>
+                {s.resold.length > 0 && (
+                  <CardContent className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="text-left text-muted-foreground">
+                        <tr>
+                          <th className="py-1 pr-4 font-normal">Book</th>
+                          <th className="py-1 pr-4 font-normal">Returned</th>
+                          <th className="py-1 pr-4 font-normal">Sold again</th>
+                          <th className="py-1 font-normal text-right">Days</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {s.resold.map((r) => (
+                          <tr key={`${r.returnDate}-${r.resoldSku}`} className="border-t align-top">
+                            <td className="py-1 pr-4">
+                              <div className="line-clamp-2">{r.title}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {r.reason}
+                                {r.refunded !== null && ` · refunded ${money(r.refunded)}`}
+                              </div>
+                            </td>
+                            <td className="py-1 pr-4 whitespace-nowrap">{r.returnDate}</td>
+                            <td className="py-1 pr-4">
+                              <div className="whitespace-nowrap">{r.resoldOn}</div>
+                              <div className="text-xs text-muted-foreground">{r.resoldSku}</div>
+                            </td>
+                            <td className="py-1 text-right tabular-nums">{r.days}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </CardContent>
+                )}
+              </Card>
+            )}
 
             <Card>
               <CardHeader>
