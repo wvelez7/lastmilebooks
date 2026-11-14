@@ -247,15 +247,15 @@ export default function Returns() {
             <div className="text-sm">
               <div className="font-medium">Upload returns you ship yourself</div>
               <div className="text-muted-foreground">
-                Seller Central → Orders → Return Reports: pick a date range, then download the report and upload it
-                here as is. Amazon's API only gives these to apps with a restricted role.
+                Seller Central → Orders → Return Reports: pick exact dates (up to 60 days), then download the XML or
+                TSV and upload it here as is. Amazon's API only gives these to apps with a restricted role.
                 {uploadedAt && ` Last upload ${formatDistanceToNow(new Date(uploadedAt), { addSuffix: true })}.`}
               </div>
             </div>
             <input
               ref={fileRef}
               type="file"
-              accept=".txt,.tsv,.csv,text/plain,text/csv,text/tab-separated-values"
+              accept=".xml,.txt,.tsv,.csv,text/xml,application/xml,text/plain,text/csv,text/tab-separated-values"
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];

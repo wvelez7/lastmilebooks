@@ -135,11 +135,41 @@ async function downloadDocument(documentId: string): Promise<string> {
   }
 }
 
-// Tab-delimited (what the API returns) or CSV (some Seller Central
-// downloads), with a header row. Headers are matched loosely ("Order ID",
-// "order-id" and "order_id" are all `orderid`) since the reports differ.
+function isXmlReport(text: string): boolean {
+  return /^\s*<(\?xml|AmazonEnvelope)/.test(text);
+}
+
+function xmlText(s: string): string {
+  return s
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+// Seller Central's Return Reports page often only offers XML: one
+// <return_details> per return, with nested <item_details> and <label_details>.
+// Each leaf becomes a field named like the flat file's (order_id \u2192 orderid).
+function parseXmlReturns(text: string): Record<string, string>[] {
+  return Array.from(text.matchAll(/<return_details>([\s\S]*?)<\/return_details>/g), ([, block]) => {
+    const row: Record<string, string> = {};
+    for (const [, tag, value] of Array.from(block.matchAll(/<([A-Za-z_]+)>([^<]*)<\/\1>/g))) {
+      row[tag.toLowerCase().replace(/[^a-z0-9]/g, "")] = xmlText(value).trim();
+    }
+    return row;
+  });
+}
+
+// Tab-delimited (what the API returns), CSV or XML (Seller Central
+// downloads). Headers are matched loosely ("Order ID", "order-id" and
+// "order_id" are all `orderid`) since the reports differ.
 export function parseFlatFile(text: string): Record<string, string>[] {
   text = text.replace(/^\uFEFF/, "");
+  if (isXmlReport(text)) return parseXmlReturns(text);
   const firstLine = text.split(/\r?\n/, 1)[0];
   const rows = firstLine.includes("\t")
     ? text.split(/\r?\n/).map((l) => l.split("\t"))
@@ -199,12 +229,12 @@ export function parseMerchantReturns(text: string): AmazonReturn[] {
       asin: r.asin ?? "",
       title: r.itemname ?? sku,
       quantity: Number(r.returnquantity) || 1,
-      reason: reasonLabel(r.returnreason ?? ""),
+      reason: reasonLabel(r.returnreason ?? r.returnreasoncode ?? ""),
       status: [r.returnrequeststatus, r.resolution].filter(Boolean).join(" · "),
       disposition: null,
       inPolicy: r.inpolicy ? yes(r.inpolicy) : null,
       azClaim: yes(r.atozclaim),
-      refunded: amount(r.refundedamount),
+      refunded: amount(r.refundedamount ?? r.refundamount),
       labelCost: paidBy.includes("seller") || paidBy.includes("merchant") ? amount(r.labelcost) : null,
       comment: null,
     }];
@@ -308,12 +338,14 @@ export class ReturnsFileError extends Error {}
 
 // A returns report downloaded from Seller Central: Orders → Return Reports
 // for books you ship, or Reports → Fulfillment → Customer Returns for FBA.
-// Same columns as the API reports. Rows already stored are updated, not doubled.
+// Same fields as the API reports, as TSV, CSV or XML. Rows already stored are
+// updated, not doubled.
 export function importReturnsFile(text: string): { kind: "Merchant" | "FBA"; rows: number; total: number } {
   const header = Object.keys(parseFlatFile(text)[0] ?? {});
   let rows: AmazonReturn[];
   let kind: "Merchant" | "FBA";
-  if (header.includes("returnrequestdate")) {
+  // An XML returns report with no <return_details> just means no returns in that range.
+  if (header.includes("returnrequestdate") || /<MessageType>Returns-Report<\/MessageType>/.test(text)) {
     rows = parseMerchantReturns(text);
     kind = "Merchant";
   } else if (header.includes("returndate") && header.includes("detaileddisposition")) {
