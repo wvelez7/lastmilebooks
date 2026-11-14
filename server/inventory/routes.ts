@@ -20,6 +20,7 @@ import * as supplies from "./supplies";
 import * as whatnot from "./whatnot";
 import * as ebay from "./ebay";
 import * as amazon from "./amazon";
+import * as amazonReturns from "./amazonReturns";
 import * as listings from "./listings";
 import { parseActiveListingsReport, ReportError } from "./ebayReport";
 import { AMAZON_POLL_MS, handleWhatnotOrder, importListings, pushQuantity, runSyncOnce } from "./sync";
@@ -341,6 +342,27 @@ export function registerInventoryRoutes(app: Express) {
     if (!ebay.ebayConnected()) return res.status(400).json({ error: "Connect eBay on the inventory page first" });
     void listings.refreshListings();
     res.status(202).json({ refreshing: true });
+  });
+
+  // Amazon returns (admin page at /#/returns). ?days= limits the summary to
+  // returns in the last that many days; rows are always the full stored set.
+  app.get("/api/amazon/returns", requireAdmin, (req, res) => {
+    const days = Number(req.query.days) || undefined;
+    const rows = amazonReturns.storedReturns();
+    res.json({
+      connected: amazon.amazonConfigured(),
+      job: amazonReturns.returnsJob(),
+      summary: amazonReturns.summarizeReturns(rows, amazonReturns.storedSales(), days),
+      rows,
+    });
+  });
+
+  app.post("/api/amazon/returns/refresh", requireAdmin, (_req, res) => {
+    try {
+      res.status(202).json(amazonReturns.startReturnsRefresh());
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
   });
 
   // Shipping supplies (admin page at /#/supplies). Any stock change can cross a

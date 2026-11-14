@@ -9,7 +9,7 @@
 import type { AmazonBook, AmazonOffer, AmazonPrice } from "@shared/listing";
 
 const TOKEN_URL = "https://api.amazon.com/auth/o2/token";
-const API_HOST = "https://sellingpartnerapi-na.amazon.com";
+export const API_HOST = "https://sellingpartnerapi-na.amazon.com";
 const US_MARKETPLACE = "ATVPDKIKX0DER";
 
 // Paid for and not cancelled; "Pending" can still be cancelled, so it waits.
@@ -23,7 +23,7 @@ export function amazonConfigured(): boolean {
 
 let cachedAccess: { token: string; expiresAt: number } | null = null;
 
-async function accessToken(): Promise<string> {
+export async function accessToken(): Promise<string> {
   if (cachedAccess && cachedAccess.expiresAt - 60_000 > Date.now()) return cachedAccess.token;
   const res = await fetch(TOKEN_URL, {
     method: "POST",
@@ -83,7 +83,7 @@ export async function listShippableOrdersSince(since: Date): Promise<AmazonOrder
 
 export type { AmazonBook, AmazonPrice };
 
-function marketplaceId(): string {
+export function marketplaceId(): string {
   return process.env.AMAZON_MARKETPLACE_ID || US_MARKETPLACE;
 }
 

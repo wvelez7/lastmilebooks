@@ -80,6 +80,7 @@ Setup:
 1. **Render disk**: `render.yaml` mounts a 1 GB disk at `/var/data` and sets `DATABASE_PATH=/var/data/data.db`. Without it the database is wiped on every deploy.
 2. **Whatnot**: whatnot.com/dashboard/developer → Personal access tokens → new token with `read:orders`, `read:inventory`, `write:inventory`. Set it as `WHATNOT_API_TOKEN`.
 3. **eBay**: developer.ebay.com → create a Production keyset (`EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`), then User Tokens → add a RuName (`EBAY_RU_NAME`) whose "auth accepted URL" is `https://<site>/api/inventory/ebay/callback`. Then click **Connect eBay** on the admin page.
+4. **Amazon returns** (admin page at `/#/returns`): click **Pull from Amazon**. The first pull covers the last 180 days and takes a few minutes; later pulls only fetch the last two weeks. It needs more roles on the same app: **Direct to Consumer Shipping (Restricted)** for returns you ship yourself, **Amazon Fulfillment** for FBA returns. Return rates use the orders report (**Inventory and Order Tracking**). A report the app isn't allowed to read is skipped and noted on the page.
 
 | Variable | Description |
 | --- | --- |
