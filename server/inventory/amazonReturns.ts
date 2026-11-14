@@ -206,8 +206,10 @@ export function reasonLabel(code: string): string {
     "missed estimated delivery": "Arrived late",
     "qualitiy unacceptable": "Poor quality",
     "quality unacceptable": "Poor quality",
-    "damaged by fc": "Damaged at Amazon warehouse",
-    "damaged by carrier": "Damaged in shipping",
+    // What the buyer picked: "Product damaged, but shipping box OK" vs "Both product and box damaged".
+    "damaged by fc": "Arrived damaged, box OK",
+    "damaged by carrier": "Arrived damaged, box damaged too",
+    switcheroo: "Different item sent back",
   };
   if (plain[words]) return plain[words];
   return words ? words[0].toUpperCase() + words.slice(1) : "No reason given";
@@ -296,8 +298,17 @@ function load<T>(key: string): T[] {
   }
 }
 
+// Labels the first upload (2026-11-14) stored before they were reworded.
+const RENAMED_REASONS: Record<string, string> = {
+  "Damaged at Amazon warehouse": reasonLabel("CR-DAMAGED_BY_FC"),
+  "Damaged in shipping": reasonLabel("CR-DAMAGED_BY_CARRIER"),
+  Switcheroo: reasonLabel("CR-SWITCHEROO"),
+};
+
 export function storedReturns(): AmazonReturn[] {
-  return load<AmazonReturn>("amazon_returns");
+  return load<AmazonReturn>("amazon_returns").map((r) =>
+    RENAMED_REASONS[r.reason] ? { ...r, reason: RENAMED_REASONS[r.reason] } : r,
+  );
 }
 
 export function storedSales(): AmazonSale[] {
