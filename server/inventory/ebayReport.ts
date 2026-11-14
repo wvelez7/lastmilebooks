@@ -24,7 +24,7 @@ const PRICES = ["currentprice", "startprice", "auctionbuyitnowprice", "buyitnowp
 const CONDITION = ["condition", "conditiondescription"];
 const ISBNS = ["pisbn", "isbn", "pean", "ean"];
 
-function parseCsv(text: string): string[][] {
+export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";

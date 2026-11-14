@@ -352,10 +352,25 @@ export function registerInventoryRoutes(app: Express) {
     res.json({
       connected: amazon.amazonConfigured(),
       job: amazonReturns.returnsJob(),
+      uploadedAt: inventoryStore.getState("amazon_returns_uploaded") ?? null,
       summary: amazonReturns.summarizeReturns(rows, amazonReturns.storedSales(), days),
       rows,
     });
   });
+
+  app.post(
+    "/api/amazon/returns/upload",
+    requireAdmin,
+    express.text({ type: "text/plain", limit: "25mb" }),
+    (req, res) => {
+      try {
+        res.json(amazonReturns.importReturnsFile(typeof req.body === "string" ? req.body : ""));
+      } catch (e) {
+        if (e instanceof amazonReturns.ReturnsFileError) return res.status(400).json({ error: e.message });
+        throw e;
+      }
+    },
+  );
 
   app.post("/api/amazon/returns/refresh", requireAdmin, (_req, res) => {
     try {

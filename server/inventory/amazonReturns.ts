@@ -11,6 +11,7 @@
 // asks for the last couple of weeks.
 import { gunzipSync } from "node:zlib";
 import { API_HOST, accessToken, amazonConfigured, marketplaceId } from "./amazon";
+import { parseCsv } from "./ebayReport";
 import { inventoryStore } from "./store";
 
 export interface AmazonReturn {
@@ -134,17 +135,20 @@ async function downloadDocument(documentId: string): Promise<string> {
   }
 }
 
-// Tab-delimited with a header row. Headers are matched loosely ("Order ID",
+// Tab-delimited (what the API returns) or CSV (some Seller Central
+// downloads), with a header row. Headers are matched loosely ("Order ID",
 // "order-id" and "order_id" are all `orderid`) since the reports differ.
 export function parseFlatFile(text: string): Record<string, string>[] {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
-  if (lines.length < 2) return [];
+  text = text.replace(/^\uFEFF/, "");
+  const firstLine = text.split(/\r?\n/, 1)[0];
+  const rows = firstLine.includes("\t")
+    ? text.split(/\r?\n/).map((l) => l.split("\t"))
+    : parseCsv(text.endsWith("\n") ? text : `${text}\n`);
+  const nonEmpty = rows.filter((r) => r.some((c) => c.trim() !== ""));
+  if (nonEmpty.length < 2) return [];
   const clean = (s: string) => s.trim().replace(/^"(.*)"$/, "$1").trim();
-  const headers = lines[0].split("\t").map((h) => clean(h).toLowerCase().replace(/[^a-z0-9]/g, ""));
-  return lines.slice(1).map((line) => {
-    const cells = line.split("\t");
-    return Object.fromEntries(headers.map((h, i) => [h, clean(cells[i] ?? "")]));
-  });
+  const headers = nonEmpty[0].map((h) => clean(h).toLowerCase().replace(/[^a-z0-9]/g, ""));
+  return nonEmpty.slice(1).map((cells) => Object.fromEntries(headers.map((h, i) => [h, clean(cells[i] ?? "")])));
 }
 
 function day(s: string | undefined): string | null {
@@ -294,6 +298,39 @@ export function startReturnsRefresh(): ReturnsJob {
   return job;
 }
 
+function merge<T extends { key: string }>(old: T[], fresh: T[]): T[] {
+  const byKey = new Map(old.map((r) => [r.key, r]));
+  for (const r of fresh) byKey.set(r.key, r);
+  return Array.from(byKey.values());
+}
+
+export class ReturnsFileError extends Error {}
+
+// A returns report downloaded from Seller Central: Orders → Return Reports
+// for books you ship, or Reports → Fulfillment → Customer Returns for FBA.
+// Same columns as the API reports. Rows already stored are updated, not doubled.
+export function importReturnsFile(text: string): { kind: "Merchant" | "FBA"; rows: number; total: number } {
+  const header = Object.keys(parseFlatFile(text)[0] ?? {});
+  let rows: AmazonReturn[];
+  let kind: "Merchant" | "FBA";
+  if (header.includes("returnrequestdate")) {
+    rows = parseMerchantReturns(text);
+    kind = "Merchant";
+  } else if (header.includes("returndate") && header.includes("detaileddisposition")) {
+    rows = parseFbaReturns(text);
+    kind = "FBA";
+  } else {
+    throw new ReturnsFileError(
+      "This doesn't look like an Amazon returns report. Download it from Seller Central → Orders → Return Reports.",
+    );
+  }
+  if (rows.length === 0) throw new ReturnsFileError("No returns found in this file. Nothing was changed.");
+  const all = merge(storedReturns(), rows);
+  inventoryStore.setState("amazon_returns", JSON.stringify(all));
+  inventoryStore.setState("amazon_returns_uploaded", new Date().toISOString());
+  return { kind, rows: rows.length, total: all.length };
+}
+
 async function refresh(): Promise<void> {
   const end = new Date(Date.now() - 5 * 60_000); // Amazon refuses an end time in the future
   const fetched: { [K in ReportKind]?: ReturnType<(typeof PARSERS)[K]> } = {};
@@ -317,7 +354,9 @@ async function refresh(): Promise<void> {
       inventoryStore.setState(`amazon_returns_through_${kind}`, end.toISOString());
     } catch (e) {
       const message = (e as Error).message;
-      job.notes.push(`${name}: ${message}`);
+      // Reading your own returns needs a restricted role, so those come from an upload instead.
+      const hint = e instanceof NotAllowed && kind === "merchant" ? " Upload the returns file from Seller Central instead." : "";
+      job.notes.push(`${name}: ${message}.${hint}`);
       inventoryStore.log("warn", `Amazon returns refresh, ${name}: ${message}`);
       if (!(e instanceof NotAllowed) && !/couldn't make the report/.test(message)) job.error = message;
     }
@@ -327,11 +366,6 @@ async function refresh(): Promise<void> {
     return;
   }
 
-  const merge = <T extends { key: string }>(old: T[], fresh: T[]) => {
-    const byKey = new Map(old.map((r) => [r.key, r]));
-    for (const r of fresh) byKey.set(r.key, r);
-    return Array.from(byKey.values());
-  };
   inventoryStore.setState(
     "amazon_returns",
     JSON.stringify(merge(storedReturns(), [...(fetched.merchant ?? []), ...(fetched.fba ?? [])])),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -106,6 +106,9 @@ export default function Returns() {
   const [rows, setRows] = useState<ReturnRow[]>([]);
   const [job, setJob] = useState<Job | null>(null);
   const [connected, setConnected] = useState(true);
+  const [uploadedAt, setUploadedAt] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const api = useCallback(
     async (method: string, url: string) => {
@@ -136,6 +139,7 @@ export default function Returns() {
       setRows(data.rows);
       setJob(data.job);
       setConnected(data.connected);
+      setUploadedAt(data.uploadedAt);
     } catch (e) {
       toast({ title: "Couldn't load returns", description: (e as Error).message, variant: "destructive" });
     }
@@ -153,6 +157,28 @@ export default function Returns() {
       setJob(await api("POST", "/api/amazon/returns/refresh"));
     } catch (e) {
       toast({ title: "Refresh failed", description: (e as Error).message, variant: "destructive" });
+    }
+  }
+
+  async function upload(file: File) {
+    setUploading(true);
+    try {
+      const res = await fetch("/api/amazon/returns/upload", {
+        method: "POST",
+        headers: { "x-admin-key": adminKey, "Content-Type": "text/plain" },
+        body: await file.text(),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `Request failed (${res.status})`);
+      toast({
+        title: `Added ${json.rows} ${json.kind === "FBA" ? "FBA " : ""}returns`,
+        description: `${json.total} returns stored in all. Re-uploading the same file doesn't double them.`,
+      });
+      await load();
+    } catch (e) {
+      toast({ title: "Upload failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -195,7 +221,7 @@ export default function Returns() {
     .sort((a, b) => b.returnDate.localeCompare(a.returnDate))
     .slice(0, 50);
   const s = summary;
-  const neverPulled = !job?.finishedAt && !job?.running;
+  const neverPulled = !job?.finishedAt && !job?.running && !uploadedAt;
 
   return (
     <main className="min-h-screen bg-muted/30 px-4 py-8">
@@ -215,6 +241,33 @@ export default function Returns() {
             {job?.running ? "Pulling…" : "Pull from Amazon"}
           </Button>
         </header>
+
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">
+            <div className="text-sm">
+              <div className="font-medium">Upload returns you ship yourself</div>
+              <div className="text-muted-foreground">
+                Seller Central → Orders → Return Reports: pick a date range, then download the report and upload it
+                here as is. Amazon's API only gives these to apps with a restricted role.
+                {uploadedAt && ` Last upload ${formatDistanceToNow(new Date(uploadedAt), { addSuffix: true })}.`}
+              </div>
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".txt,.tsv,.csv,text/plain,text/csv,text/tab-separated-values"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void upload(file);
+              }}
+            />
+            <Button variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
+              {uploading ? "Uploading…" : "Upload file"}
+            </Button>
+          </CardContent>
+        </Card>
 
         {!connected && <p className="text-sm text-destructive">Amazon isn't connected on the server.</p>}
         {job?.error && <p className="text-sm text-destructive">{job.error}</p>}
