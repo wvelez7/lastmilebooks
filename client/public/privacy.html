@@ -37,15 +37,16 @@ main{padding:3rem 0 4rem}
 <p>When you request a pickup, we collect your name, email address, phone number, pickup address, city, number of boxes, preferred date, and any notes you add.</p>
 <p>We use this only to schedule and complete your pickup and to contact you about it. Requests are stored in our database and emailed to our team.</p>
 
-<h2>eBay and Whatnot accounts</h2>
+<h2>eBay, Whatnot and Amazon accounts</h2>
 <p>We connect only our own seller accounts, to keep our inventory accurate across marketplaces and to price and manage our listings. Through that connection we use:</p>
 <ul>
 <li>Listing details such as title, price, quantity, SKU, ISBN, condition, shipping cost, image, and link.</li>
 <li>Order details needed to update stock: order and item IDs, title, SKU, and quantity sold.</li>
+<li>Return details from our own Amazon returns reports: order ID, dates, SKU, title, quantity, return reason and status, refund amount, return-label cost and, for Amazon-fulfilled orders, the buyer's return comment.</li>
 <li>Prices of other sellers' public listings for the same book, shown when we look a book up and not stored.</li>
 <li>The access credentials that keep the connection working.</li>
 </ul>
-<p>We do not store buyers' names, addresses, or payment details in this system. Buyer information needed to ship an order stays with the marketplace. We do not use eBay data for advertising, and we do not sell it.</p>
+<p>We do not store buyers' names, addresses, or payment details in this system. Buyer information needed to ship an order stays with the marketplace. If a marketplace report includes buyer details, they are discarded when the report is read and never saved. We do not use marketplace data for advertising, and we do not sell or share it. It is stored only in our database at our hosting provider, Render, which encrypts it at rest, and only the owner can access it.</p>
 
 <h2>Who we share information with</h2>
 <p>We do not sell personal information. We share it only with the service providers that run our website and email, Render (hosting) and Resend (email delivery), so they can provide those services, or when the law requires it.</p>
