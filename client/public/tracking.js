@@ -2,8 +2,8 @@
 // Nothing loads until the IDs below are filled in. The pickup form calls
 // window.lmbTrackLead() after a request is submitted.
 (function () {
-  var GOOGLE_ADS_ID = ""; // e.g. "AW-123456789"
-  var GOOGLE_ADS_LEAD_LABEL = ""; // label of the "Submit lead form" conversion
+  var GOOGLE_ADS_ID = "AW-18577554635";
+  var GOOGLE_ADS_LEAD_LABEL = "iEviCIusmrkdEMv5u5pF"; // "Pickup request form" conversion
   var META_PIXEL_ID = ""; // e.g. "1234567890123456"
 
   window.lmbTrackLead = function () {};
