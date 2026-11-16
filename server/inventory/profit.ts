@@ -120,6 +120,9 @@ export function listedInventory(): ListedInventory {
           price: l.price,
           shipping: l.shipping,
           quantity: l.quantity,
+          sku: l.sku,
+          isbn: l.isbn ?? (l.sku ? toIsbn13(l.sku) : null),
+          url: l.url,
         })),
     ],
     crossListed: matchCrossListed(

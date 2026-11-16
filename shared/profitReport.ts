@@ -253,6 +253,9 @@ export interface ListedItem {
   price: number;
   shipping: number | null; // eBay: what the buyer pays; null = calculated
   quantity: number;
+  sku?: string | null; // eBay custom label
+  isbn?: string | null; // ISBN-13 when known
+  url?: string | null; // the listing on eBay
 }
 
 export interface ListedInventory {
@@ -275,6 +278,7 @@ export interface ListedSummary {
   total: ListedTotals; // Amazon + eBay-only
   byPlatform: Record<ProfitPlatform, ListedTotals>;
   crossListed: number; // eBay listings left out because the book is on Amazon
+  ebayOnly: ListedItem[]; // eBay listings whose book isn't on Amazon, by title
   priceBands: { label: string; books: number; value: number }[];
 }
 
@@ -336,6 +340,7 @@ export function summarizeListed(
   // With both marketplaces shown, Amazon counts every listing and eBay only
   // the books that aren't also on Amazon, so the two rows add up to the total.
   const amazonIds = new Set(listed.items.filter((i) => i.platform === "amazon").map((i) => i.id));
+  const allEbayOnAmazon = new Set(listed.crossListed.filter((p) => amazonIds.has(p.amazon)).map((p) => p.ebay));
   const ebayAlsoOnAmazon = new Set(
     platform === "all" ? listed.crossListed.filter((p) => amazonIds.has(p.amazon)).map((p) => p.ebay) : [],
   );
@@ -380,6 +385,20 @@ export function summarizeListed(
     total: round(total),
     byPlatform: { amazon: round(byPlatform.amazon), ebay: round(byPlatform.ebay) },
     crossListed,
+    ebayOnly: listed.items
+      .filter((i) => i.platform === "ebay" && !allEbayOnAmazon.has(i.id))
+      .sort((a, b) => a.title.localeCompare(b.title)),
     priceBands: bands.map((b) => ({ ...b, value: roundCents(b.value) })),
   };
+}
+
+// A book's ASIN on Amazon is its ISBN-10 when it has one (978 ISBNs only;
+// 979 ISBNs have no ISBN-10). null otherwise.
+export function isbn13To10(isbn13: string | null | undefined): string | null {
+  if (!isbn13 || !/^978\d{10}$/.test(isbn13)) return null;
+  const body = isbn13.slice(3, 12);
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += Number(body[i]) * (10 - i);
+  const check = (11 - (sum % 11)) % 11;
+  return body + (check === 10 ? "X" : String(check));
 }

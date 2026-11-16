@@ -8,11 +8,12 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { forgetAdminKey, readAdminKey, saveAdminKey } from "@/lib/adminKey";
-import { localDay, summarizeListed, summarizeProfit } from "@shared/profitReport";
+import { isbn13To10, localDay, summarizeListed, summarizeProfit } from "@shared/profitReport";
 import type {
   AccountCharge,
   ListedFeeRates,
   ListedInventory,
+  ListedItem,
   ListedSummary,
   ListedTotals,
   ProfitPlatform,
@@ -268,7 +269,108 @@ function ListedSection({
   );
 }
 
-const BREAKDOWN:{ key: keyof ProfitTotals; label: string; minus: boolean; hint?: string }[] = [
+function csvCell(v: string | number | null | undefined): string {
+  const s = v === null || v === undefined ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// Books listed on eBay whose book isn't on Amazon, with the ISBN to list it
+// there (a book's ASIN is its ISBN-10).
+function EbayOnlyList({ items }: { items: ListedItem[] }) {
+  const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const needle = search.trim().toLowerCase();
+  const matching = items.filter(
+    (i) =>
+      !needle ||
+      i.title.toLowerCase().includes(needle) ||
+      (i.isbn ?? "").includes(needle) ||
+      (isbn13To10(i.isbn) ?? "").toLowerCase().includes(needle) ||
+      (i.sku ?? "").toLowerCase().includes(needle),
+  );
+  const shown = showAll || needle ? matching : matching.slice(0, 50);
+  const noIsbn = items.filter((i) => !i.isbn).length;
+
+  function download() {
+    const lines = [
+      ["Title", "ISBN-13", "ISBN-10 / ASIN", "eBay SKU", "eBay item ID", "Price", "Quantity", "eBay link"].join(","),
+      ...items.map((i) =>
+        [i.title, i.isbn, isbn13To10(i.isbn), i.sku, i.id, i.price.toFixed(2), i.quantity, i.url].map(csvCell).join(","),
+      ),
+    ];
+    const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ebay-not-on-amazon-${localDay(new Date())}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <Card>
+      <CardHeader className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle className="text-lg">On eBay, not on Amazon ({items.length.toLocaleString()})</CardTitle>
+          <Button variant="outline" size="sm" onClick={download} disabled={items.length === 0}>
+            Download CSV
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          A book's ASIN on Amazon is usually its ISBN-10.
+          {noIsbn > 0 &&
+            ` ${noIsbn.toLocaleString()} listing${noIsbn > 1 ? "s have" : " has"} no ISBN yet: eBay hasn't sent it, or the listing doesn't have one.`}
+        </p>
+        <Input placeholder="Search title, ISBN or SKU" value={search} onChange={(e) => setSearch(e.target.value)} />
+      </CardHeader>
+      <CardContent className="overflow-x-auto">
+        {matching.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{items.length ? "No matches." : "Every eBay book is also on Amazon."}</p>
+        ) : (
+          <>
+            <table className="w-full text-sm">
+              <thead className="text-left text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-4 font-normal">Book</th>
+                  <th className="py-1 pr-4 font-normal">ISBN-13</th>
+                  <th className="py-1 pr-4 font-normal">ISBN-10 / ASIN</th>
+                  <th className="py-1 pr-4 font-normal text-right">Price</th>
+                  <th className="py-1 font-normal text-right">Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((i) => (
+                  <tr key={i.id} className="border-t">
+                    <td className="max-w-xs py-1.5 pr-4">
+                      {i.url ? (
+                        <a href={i.url} target="_blank" rel="noreferrer" className="block truncate underline-offset-2 hover:underline">
+                          {i.title}
+                        </a>
+                      ) : (
+                        <div className="truncate">{i.title}</div>
+                      )}
+                      {i.sku && <div className="truncate text-xs text-muted-foreground">{i.sku}</div>}
+                    </td>
+                    <td className="py-1.5 pr-4 font-mono text-xs whitespace-nowrap">{i.isbn ?? "—"}</td>
+                    <td className="py-1.5 pr-4 font-mono text-xs whitespace-nowrap">{isbn13To10(i.isbn) ?? "—"}</td>
+                    <td className="py-1.5 pr-4 text-right tabular-nums whitespace-nowrap">{money(i.price)}</td>
+                    <td className="py-1.5 text-right tabular-nums">{i.quantity}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!needle && !showAll && matching.length > shown.length && (
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setShowAll(true)}>
+                Show all {matching.length.toLocaleString()}
+              </Button>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+const BREAKDOWN: { key: keyof ProfitTotals; label: string; minus: boolean; hint?: string }[] = [
   { key: "sales", label: "Sales (book + shipping paid)", minus: false },
   { key: "fees", label: "Marketplace fees", minus: true },
   { key: "refunds", label: "Refunds", minus: true },
@@ -600,6 +702,8 @@ export default function Profit() {
         {data?.listed && listedSummary && (
           <ListedSection listed={data.listed} summary={listedSummary} platform={platform} />
         )}
+
+        {listedSummary && <EbayOnlyList items={listedSummary.ebayOnly} />}
 
         {data && (
           <Card>
