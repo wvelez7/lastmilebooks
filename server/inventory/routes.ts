@@ -23,6 +23,8 @@ import * as ebay from "./ebay";
 import * as amazon from "./amazon";
 import * as amazonReturns from "./amazonReturns";
 import * as repricer from "./repricer";
+import * as profit from "./profit";
+import { profitSettingsSchema } from "@shared/profitReport";
 import * as listings from "./listings";
 import { parseActiveListingsReport, ReportError } from "./ebayReport";
 import { AMAZON_POLL_MS, handleWhatnotOrder, importListings, pushQuantity, runSyncOnce } from "./sync";
@@ -377,6 +379,35 @@ export function registerInventoryRoutes(app: Express) {
   app.post("/api/amazon/returns/refresh", requireAdmin, (_req, res) => {
     try {
       res.status(202).json(amazonReturns.startReturnsRefresh());
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  // Profit dashboard (admin page at /#/profit). The page does the totals so
+  // cost changes show at once; this hands it every stored row.
+  app.get("/api/profit", requireAdmin, (_req, res) => {
+    res.json({
+      amazonConnected: amazon.amazonConfigured(),
+      ebayConnected: ebay.ebayConnected(),
+      job: profit.profitJob(),
+      settings: profit.getSettings(),
+      suppliesPerOrder: profit.suppliesCostPerOrder(),
+      rows: profit.storedRows(),
+      charges: profit.storedCharges(),
+    });
+  });
+
+  app.put("/api/profit/settings", requireAdmin, (req, res) => {
+    const parsed = profitSettingsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid settings" });
+    profit.saveSettings(parsed.data);
+    res.json(parsed.data);
+  });
+
+  app.post("/api/profit/refresh", requireAdmin, (_req, res) => {
+    try {
+      res.status(202).json(profit.startProfitRefresh());
     } catch (e) {
       res.status(400).json({ error: (e as Error).message });
     }

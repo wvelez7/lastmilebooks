@@ -11,6 +11,7 @@ import Scan from "@/pages/Scan";
 import Supplies from "@/pages/Supplies";
 import Returns from "@/pages/Returns";
 import Repricer from "@/pages/Repricer";
+import Profit from "@/pages/Profit";
 
 function AppRouter() {
   return (
@@ -21,6 +22,7 @@ function AppRouter() {
       <Route path="/supplies" component={Supplies} />
       <Route path="/returns" component={Returns} />
       <Route path="/repricer" component={Repricer} />
+      <Route path="/profit" component={Profit} />
       <Route component={NotFound} />
     </Switch>
   );

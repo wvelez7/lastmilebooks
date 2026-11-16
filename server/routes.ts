@@ -13,6 +13,7 @@ import { registerInventoryRoutes } from "./inventory/routes";
 import { startInventorySync } from "./inventory/sync";
 import { startListingRefresh } from "./inventory/listings";
 import { startRepricer } from "./inventory/repricer";
+import { startProfitAutoRefresh } from "./inventory/profit";
 import { recoverInterruptedBatches } from "./inventory/batches";
 
 export async function registerRoutes(
@@ -68,6 +69,7 @@ export async function registerRoutes(
   startInventorySync();
   startListingRefresh();
   startRepricer();
+  startProfitAutoRefresh();
   recoverInterruptedBatches();
 
   return httpServer;
