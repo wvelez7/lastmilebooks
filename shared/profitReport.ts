@@ -272,9 +272,9 @@ export interface ListedTotals {
 }
 
 export interface ListedSummary {
-  total: ListedTotals; // a book listed on both counts once, at its better profit
+  total: ListedTotals; // Amazon + eBay-only
   byPlatform: Record<ProfitPlatform, ListedTotals>;
-  crossListed: number;
+  crossListed: number; // eBay listings left out because the book is on Amazon
   priceBands: { label: string; books: number; value: number }[];
 }
 
@@ -333,11 +333,22 @@ export function summarizeListed(
   platform: ProfitPlatform | "all" = "all",
 ): ListedSummary {
   const byPlatform: Record<ProfitPlatform, ListedTotals> = { amazon: emptyListed(), ebay: emptyListed() };
-  const unit = new Map<string, { item: ListedItem; fees: number; profit: number }>();
+  // With both marketplaces shown, Amazon counts every listing and eBay only
+  // the books that aren't also on Amazon, so the two rows add up to the total.
+  const amazonIds = new Set(listed.items.filter((i) => i.platform === "amazon").map((i) => i.id));
+  const ebayAlsoOnAmazon = new Set(
+    platform === "all" ? listed.crossListed.filter((p) => amazonIds.has(p.amazon)).map((p) => p.ebay) : [],
+  );
+  const unit: ListedItem[] = [];
+  let crossListed = 0;
   for (const item of listed.items) {
     if (platform !== "all" && item.platform !== platform) continue;
+    if (item.platform === "ebay" && ebayAlsoOnAmazon.has(item.id)) {
+      crossListed++;
+      continue;
+    }
     const u = listedUnitProfit(item, settings, suppliesPerOrder, rates);
-    unit.set(`${item.platform}:${item.id}`, { item, ...u });
+    unit.push(item);
     const t = byPlatform[item.platform];
     t.listings++;
     t.books += item.quantity;
@@ -351,27 +362,9 @@ export function summarizeListed(
   for (const t of Object.values(byPlatform)) {
     for (const k of Object.keys(total) as (keyof ListedTotals)[]) total[k] += t[k];
   }
-  // A book listed on both sells once: take out the copy that would earn less.
-  let crossListed = 0;
-  if (platform === "all") {
-    for (const pair of listed.crossListed) {
-      const a = unit.get(`amazon:${pair.amazon}`);
-      const e = unit.get(`ebay:${pair.ebay}`);
-      if (!a || !e) continue;
-      crossListed++;
-      const drop = a.profit >= e.profit ? e : a;
-      const q = Math.min(a.item.quantity, e.item.quantity);
-      total.listings--;
-      total.books -= q;
-      total.value -= drop.item.price * q;
-      total.fees -= drop.fees * q;
-      total.profit -= drop.profit * q;
-      if (drop.profit < 0) total.losing--;
-    }
-  }
 
   const bands = BANDS.map(([, label]) => ({ label, books: 0, value: 0 }));
-  for (const { item } of Array.from(unit.values())) {
+  for (const item of unit) {
     const i = BANDS.findIndex(([max]) => item.price < max);
     bands[i].books += item.quantity;
     bands[i].value += item.price * item.quantity;

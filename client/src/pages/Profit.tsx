@@ -222,14 +222,21 @@ function ListedSection({
                 </tr>
               </thead>
               <tbody>
-                {platforms.map((p) => row(PLATFORM_LABEL[p], summary.byPlatform[p]))}
-                {platform === "all" && summary.crossListed > 0 && row("Both, each book once", t, true)}
+                {platform === "all" ? (
+                  <>
+                    {row("Amazon (all)", summary.byPlatform.amazon)}
+                    {row("eBay (not on Amazon)", summary.byPlatform.ebay)}
+                    {row("Total", t, true)}
+                  </>
+                ) : (
+                  platforms.map((p) => row(PLATFORM_LABEL[p], summary.byPlatform[p]))
+                )}
               </tbody>
             </table>
-            {platform === "all" && summary.crossListed > 0 && (
+            {platform === "all" && (
               <p className="mt-2 text-xs text-muted-foreground">
-                {summary.crossListed} book{summary.crossListed > 1 ? "s are" : " is"} listed on both (same SKU, same ISBN, or
-                linked on /#/inventory); the total counts each once, on whichever would earn more.
+                {summary.crossListed.toLocaleString()} eBay listing{summary.crossListed === 1 ? " is" : "s are"} left out
+                because the same book is on Amazon (same SKU, same ISBN, or linked on /#/inventory).
               </p>
             )}
           </div>
@@ -733,8 +740,8 @@ export default function Profit() {
         )}
 
         <p className="text-xs text-muted-foreground">
-          Amazon numbers come from your payments (the same as Seller Central's transaction view), dated when the money
-          posted. eBay numbers come from each order's total and eBay's fee, dated when the order was placed; promoted
+          Amazon sales come from your orders report, dated when the order was placed, like Seller Central counts them;
+          fees, refunds and other charges come from your payments as Amazon posts them. eBay numbers come from each order's total and eBay's fee, dated when the order was placed; promoted
           listing fees and labels bought on eBay aren't included yet. Sales tax is left out on both.
         </p>
       </div>
