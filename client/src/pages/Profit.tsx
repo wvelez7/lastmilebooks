@@ -228,8 +228,8 @@ function ListedSection({
             </table>
             {platform === "all" && summary.crossListed > 0 && (
               <p className="mt-2 text-xs text-muted-foreground">
-                {summary.crossListed} book{summary.crossListed > 1 ? "s are" : " is"} listed on both (linked on /#/inventory);
-                the total counts each once, on whichever would earn more.
+                {summary.crossListed} book{summary.crossListed > 1 ? "s are" : " is"} listed on both (same SKU, same ISBN, or
+                linked on /#/inventory); the total counts each once, on whichever would earn more.
               </p>
             )}
           </div>

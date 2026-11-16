@@ -6,7 +6,7 @@
 //    order total and eBay's fee (totalMarketplaceFee).
 // Rows are stored in sync_state as JSON and merged by key, so pulling an
 // overlapping range never counts a sale twice.
-import { computeProfit } from "@shared/profit";
+import { computeProfit, toIsbn13 } from "@shared/profit";
 import { profitSettingsSchema } from "@shared/profitReport";
 import type { AccountCharge, ProfitRow, ProfitSettings } from "@shared/profitReport";
 import { inventoryStore } from "./store";
@@ -122,13 +122,58 @@ export function listedInventory(): ListedInventory {
           quantity: l.quantity,
         })),
     ],
-    crossListed: inventoryStore
-      .listItems()
-      .filter((i) => i.amazonSku && i.ebayItemId)
-      .map((i) => ({ amazon: i.amazonSku!, ebay: i.ebayItemId! })),
+    crossListed: matchCrossListed(
+      repricerListings().map((l) => ({ sku: l.sku, isbn: toIsbn13(l.asin) ?? toIsbn13(l.sku) })),
+      ebayListings()
+        .filter((l) => l.quantity > 0)
+        .map((l) => ({ itemId: l.itemId, sku: l.sku, isbn: l.isbn ?? (l.sku ? toIsbn13(l.sku) : null) })),
+      inventoryStore
+        .listItems()
+        .filter((i) => i.amazonSku && i.ebayItemId)
+        .map((i) => ({ amazon: i.amazonSku!, ebay: i.ebayItemId! })),
+    ),
     amazonAt: listingsRefreshedAt(),
     ebayAt: ebayListingStatus().refreshedAt,
   };
+}
+
+// The same book listed on both marketplaces, so it's counted once. Matched,
+// most certain first, by: a link on /#/inventory, the same SKU (the inventory
+// sync uses one SKU everywhere), or the same ISBN (a book's ASIN on Amazon is
+// usually its ISBN-10). Each listing pairs with at most one other.
+export function matchCrossListed(
+  amazonListings: { sku: string; isbn: string | null }[],
+  ebayListings: { itemId: string; sku: string | null; isbn: string | null }[],
+  links: { amazon: string; ebay: string }[],
+): { amazon: string; ebay: string }[] {
+  const amazonSkus = new Set(amazonListings.map((a) => a.sku));
+  const ebayIds = new Set(ebayListings.map((e) => e.itemId));
+  const usedA = new Set<string>();
+  const usedE = new Set<string>();
+  const pairs: { amazon: string; ebay: string }[] = [];
+  const pair = (amazon: string, ebay: string) => {
+    if (usedA.has(amazon) || usedE.has(ebay)) return;
+    usedA.add(amazon);
+    usedE.add(ebay);
+    pairs.push({ amazon, ebay });
+  };
+  for (const l of links) if (amazonSkus.has(l.amazon) && ebayIds.has(l.ebay)) pair(l.amazon, l.ebay);
+  const bySku = new Map<string, string>();
+  const byIsbn = new Map<string, string[]>();
+  for (const a of amazonListings) {
+    bySku.set(a.sku.toLowerCase(), a.sku);
+    if (a.isbn) byIsbn.set(a.isbn, [...(byIsbn.get(a.isbn) ?? []), a.sku]);
+  }
+  for (const e of ebayListings) {
+    const a = e.sku ? bySku.get(e.sku.toLowerCase()) : undefined;
+    if (a) pair(a, e.itemId);
+  }
+  for (const e of ebayListings) {
+    if (usedE.has(e.itemId) || !e.isbn) continue;
+    const a = (byIsbn.get(e.isbn) ?? []).find((sku) => !usedA.has(sku));
+    if (a) pair(a, e.itemId);
+  }
+  return pairs;
 }
 
 // ---- Amazon: financial events --------------------------------------------
