@@ -15,7 +15,7 @@ import {
 import HERO_PHOTO from "@/assets/photos/hero.jpg";
 import BOOKS_STACK_PHOTO from "@/assets/photos/books-stack.jpg";
 import BOOKSHELF_PHOTO from "@/assets/photos/bookshelf.jpg";
-import DONATION_BOX_PHOTO from "@/assets/photos/donation-box.jpg";
+import DONATED_BOOKS_PHOTO from "@/assets/photos/donated-books.jpg";
 import OPEN_BOOK_PHOTO from "@/assets/photos/open-book.jpg";
 
 function scrollTo(id: string) {
@@ -189,8 +189,8 @@ export default function Home() {
             <div className="relative">
               <div className="aspect-[4/5] overflow-hidden rounded-3xl border border-border shadow-md">
                 <img
-                  src={DONATION_BOX_PHOTO}
-                  alt="A close-up row of well-loved used books standing upright"
+                  src={DONATED_BOOKS_PHOTO}
+                  alt="Stacks of donated books from a Last Mile Books pickup: novels, cookbooks, textbooks, travel guides and a boxed series"
                   className="h-full w-full object-cover"
                   loading="lazy"
                 />
