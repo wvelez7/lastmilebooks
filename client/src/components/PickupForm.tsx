@@ -196,7 +196,7 @@ export function PickupForm() {
             name="phone"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Phone</FormLabel>
+                <FormLabel>Phone (optional)</FormLabel>
                 <FormControl>
                   <Input
                     type="tel"

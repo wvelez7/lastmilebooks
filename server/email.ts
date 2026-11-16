@@ -113,7 +113,7 @@ function renderOwnerText(r: PickupRequest): string {
     ``,
     `Name:     ${r.fullName}`,
     `Email:    ${r.email}`,
-    `Phone:    ${r.phone}`,
+    `Phone:    ${r.phone || "(not given)"}`,
     `Address:  ${r.pickupAddress}`,
     `City:     ${r.city}`,
     `Boxes:    ${r.numberOfBoxes}`,
@@ -139,7 +139,7 @@ function renderOwnerHtml(r: PickupRequest): string {
         <table style="border-collapse:collapse;width:100%;">
           ${row("Name", r.fullName)}
           ${row("Email", r.email)}
-          ${row("Phone", r.phone)}
+          ${row("Phone", r.phone || "(not given)")}
           ${row("Address", r.pickupAddress)}
           ${row("City", r.city)}
           ${row("Boxes", r.numberOfBoxes)}
@@ -169,7 +169,7 @@ function renderCustomerText(r: PickupRequest): string {
     ``,
     `On the day of pickup, please leave your books on the porch or at the top of your driveway. We'll send a confirmation email that day with your pickup window.`,
     ``,
-    `Questions? Just reply to this email or call (951) 249-3215.`,
+    `Questions? Just reply to this email.`,
     ``,
     `Thanks,`,
     `Last Mile Books`,

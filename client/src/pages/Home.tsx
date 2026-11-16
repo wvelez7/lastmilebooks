@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { PickupForm } from "@/components/PickupForm";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -24,6 +24,23 @@ function scrollTo(id: string) {
 }
 
 export default function Home() {
+  const [showStickyCta, setShowStickyCta] = useState(false);
+
+  // Mobile booking bar: shown once the hero scrolls away, hidden over the form.
+  useEffect(() => {
+    const hero = document.getElementById("hero");
+    const schedule = document.getElementById("schedule");
+    if (!hero || !schedule) return;
+    const visible = new Map<Element, boolean>();
+    const observer = new IntersectionObserver((entries) => {
+      for (const e of entries) visible.set(e.target, e.isIntersecting);
+      setShowStickyCta(!visible.get(hero) && !visible.get(schedule));
+    });
+    observer.observe(hero);
+    observer.observe(schedule);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     // Support deep-links from static landing pages: /?scrollTo=schedule
     const params = new URLSearchParams(window.location.search);
@@ -43,11 +60,11 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background pb-20 text-foreground md:pb-0">
       <SiteHeader />
 
       {/* HERO */}
-      <section className="relative overflow-hidden">
+      <section id="hero" className="relative overflow-hidden">
         <div className="absolute inset-0 -z-10 bg-gradient-to-b from-secondary/60 to-background" />
         <div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
           <div className="grid items-center gap-12 md:grid-cols-2">
@@ -457,6 +474,23 @@ export default function Home() {
       </section>
 
       <SiteFooter />
+
+      <div
+        className={`fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur transition-transform duration-300 md:hidden ${
+          showStickyCta ? "translate-y-0" : "translate-y-full"
+        }`}
+        aria-hidden={!showStickyCta}
+      >
+        <Button
+          size="lg"
+          className="w-full"
+          tabIndex={showStickyCta ? 0 : -1}
+          onClick={() => scrollTo("schedule")}
+          data-testid="button-sticky-schedule"
+        >
+          Schedule a free pickup
+        </Button>
+      </div>
     </div>
   );
 }

@@ -37,7 +37,9 @@ export const MAX_PICKUP_PHOTO_CHARS = 4_000_000;
 export const insertPickupRequestSchema = createInsertSchema(pickupRequests, {
   fullName: (s) => s.min(2, "Please enter your full name"),
   email: (s) => s.email("Please enter a valid email"),
-  phone: (s) => s.min(7, "Please enter a valid phone number"),
+  // Optional: blank is stored as "".
+  phone: (s) =>
+    s.trim().refine((v) => v === "" || v.length >= 7, "Please enter a valid phone number"),
   pickupAddress: (s) => s.min(5, "Please enter a street address"),
   city: (s) => s.min(2, "Please enter a city"),
   numberOfBoxes: (s) => s.min(1, "How many boxes?"),

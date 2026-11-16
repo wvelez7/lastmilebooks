@@ -116,7 +116,7 @@ export function pickupEvent(
     location: `${r.pickupAddress}, ${r.city}, CA`,
     description: [
       `Name: ${r.fullName}`,
-      `Phone: ${r.phone}`,
+      `Phone: ${r.phone || "(not given)"}`,
       `Email: ${r.email}`,
       `Address: ${r.pickupAddress}, ${r.city}`,
       `Boxes: ${r.numberOfBoxes}`,
