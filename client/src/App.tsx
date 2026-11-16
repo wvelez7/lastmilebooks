@@ -10,6 +10,7 @@ import Inventory from "@/pages/Inventory";
 import Scan from "@/pages/Scan";
 import Supplies from "@/pages/Supplies";
 import Returns from "@/pages/Returns";
+import Repricer from "@/pages/Repricer";
 
 function AppRouter() {
   return (
@@ -19,6 +20,7 @@ function AppRouter() {
       <Route path="/scan" component={Scan} />
       <Route path="/supplies" component={Supplies} />
       <Route path="/returns" component={Returns} />
+      <Route path="/repricer" component={Repricer} />
       <Route component={NotFound} />
     </Switch>
   );

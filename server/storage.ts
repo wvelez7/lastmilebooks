@@ -134,6 +134,43 @@ sqlite.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS batch_items_batch ON batch_items (batch_id);
+
+  CREATE TABLE IF NOT EXISTS repricer_listings (
+    sku TEXT PRIMARY KEY,
+    asin TEXT NOT NULL,
+    title TEXT NOT NULL,
+    condition TEXT,
+    price REAL NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    opened_at TEXT,
+    first_price REAL,
+    min_price REAL,
+    max_price REAL,
+    min_max_source TEXT,
+    competitor_price REAL,
+    competitor_label TEXT,
+    competitors INTEGER,
+    buy_box_price REAL,
+    has_buy_box INTEGER NOT NULL DEFAULT 0,
+    my_shipping REAL,
+    target_price REAL,
+    status TEXT,
+    checked_at TEXT,
+    changed_at TEXT,
+    active INTEGER NOT NULL DEFAULT 1
+  );
+
+  CREATE TABLE IF NOT EXISTS repricer_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sku TEXT NOT NULL,
+    title TEXT NOT NULL,
+    old_price REAL NOT NULL,
+    new_price REAL NOT NULL,
+    competitor_price REAL,
+    reason TEXT NOT NULL,
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Columns added after a table was first created, which CREATE TABLE IF NOT

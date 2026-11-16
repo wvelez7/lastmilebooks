@@ -91,12 +91,16 @@ function sleep(ms: number) {
 }
 
 // One report for one date range; "" when Amazon has nothing for it.
-async function fetchReport(kind: ReportKind, start: Date, end: Date): Promise<string> {
+function fetchReport(kind: ReportKind, start: Date, end: Date): Promise<string> {
+  return fetchReportOfType(REPORTS[kind].type, { start, end });
+}
+
+// Any report type; reports that aren't for a date range leave out `range`.
+export async function fetchReportOfType(reportType: string, range?: { start: Date; end: Date }): Promise<string> {
   const { reportId } = await reportsApi<{ reportId: string }>("POST", "/reports", {
-    reportType: REPORTS[kind].type,
+    reportType,
     marketplaceIds: [marketplaceId()],
-    dataStartTime: start.toISOString(),
-    dataEndTime: end.toISOString(),
+    ...(range ? { dataStartTime: range.start.toISOString(), dataEndTime: range.end.toISOString() } : {}),
   });
   const deadline = Date.now() + 30 * 60_000;
   for (;;) {

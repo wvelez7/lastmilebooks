@@ -341,6 +341,130 @@ export async function setOfferQuantity(sku: string, quantity: number): Promise<v
   if (error) throw error;
 }
 
+// The item price only; shipping comes from your shipping template.
+export async function setOfferPrice(sku: string, price: number): Promise<void> {
+  const marketplace_id = marketplaceId();
+  const result = await spRequest<ListingSubmission>("PATCH", listingPath(sku), "price update", {
+    productType: "PRODUCT",
+    patches: [
+      {
+        op: "replace",
+        path: "/attributes/purchasable_offer",
+        value: [{ currency: "USD", marketplace_id, our_price: [{ schedule: [{ value_with_tax: price }] }] }],
+      },
+    ],
+  });
+  const error = submissionError("didn't accept the price", result);
+  if (error) throw error;
+}
+
+export interface CompetingOffer {
+  sellerId: string | null;
+  condition: string; // as Amazon sends it, e.g. "VeryGood" or "very_good"
+  price: number;
+  shipping: number;
+  fba: boolean;
+  mine: boolean;
+  buyBoxWinner: boolean;
+  feedbackPercent: number | null;
+}
+
+export interface ItemOffers {
+  asin: string;
+  offers: CompetingOffer[];
+  buyBox: AmazonPrice | null;
+  error: string | null;
+}
+
+interface BatchOffer extends Offer {
+  SellerId?: string;
+  MyOffer?: boolean;
+  IsBuyBoxWinner?: boolean;
+  SellerFeedbackRating?: { SellerPositiveFeedbackRating?: number };
+}
+
+// Exported for testing with a saved response.
+export function toItemOffers(asin: string, payload: OffersPayload & { Offers?: BatchOffer[] }, isNew: boolean): ItemOffers {
+  const box = (payload.Summary?.BuyBoxPrices ?? []).find((e) => (e.condition.toLowerCase() === "new") === isNew);
+  return {
+    asin,
+    buyBox: toPrice(box),
+    error: null,
+    offers: ((payload.Offers ?? []) as BatchOffer[]).flatMap((o) =>
+      o.ListingPrice
+        ? [{
+            sellerId: o.SellerId ?? null,
+            condition: o.SubCondition ?? (isNew ? "new" : ""),
+            price: o.ListingPrice.Amount,
+            shipping: o.Shipping?.Amount ?? 0,
+            fba: Boolean(o.IsFulfilledByAmazon),
+            mine: Boolean(o.MyOffer),
+            buyBoxWinner: Boolean(o.IsBuyBoxWinner),
+            feedbackPercent: o.SellerFeedbackRating?.SellerPositiveFeedbackRating ?? null,
+          }]
+        : [],
+    ),
+  };
+}
+
+// Up to 20 books per call with getItemOffersBatch, which allows one call
+// every 10 seconds, so 1,000 books take about 8 minutes. Amazon sends the
+// 20 cheapest offers in the condition asked for.
+const BATCH_SIZE = 20;
+const BATCH_SPACING_MS = 10_500;
+
+export async function getOffersInBatches(
+  asins: string[],
+  isNew: boolean,
+  onProgress?: (done: number) => void,
+): Promise<ItemOffers[]> {
+  const out: ItemOffers[] = [];
+  for (let i = 0; i < asins.length; i += BATCH_SIZE) {
+    if (i > 0) await new Promise((r) => setTimeout(r, BATCH_SPACING_MS));
+    const chunk = asins.slice(i, i + BATCH_SIZE);
+    const body = {
+      requests: chunk.map((asin) => ({
+        uri: `/products/pricing/v0/items/${encodeURIComponent(asin)}/offers`,
+        method: "GET",
+        MarketplaceId: marketplaceId(),
+        ItemCondition: isNew ? "New" : "Used",
+        CustomerType: "Consumer",
+      })),
+    };
+    let page: {
+      responses?: {
+        status?: { statusCode?: number };
+        request?: { uri?: string };
+        body?: { payload?: OffersPayload & { ASIN?: string }; errors?: { message?: string }[] };
+      }[];
+    };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        page = await spRequest("POST", "/batches/products/pricing/v0/itemOffers", "price check", body);
+        break;
+      } catch (e) {
+        if (attempt >= 3 || !/busy/.test((e as Error).message)) throw e;
+        await new Promise((r) => setTimeout(r, 30_000));
+      }
+    }
+    // Matched by the ASIN each answer names, in case they come back out of order.
+    const responses = page.responses ?? [];
+    const asinOf = (r: (typeof responses)[number]) =>
+      r.body?.payload?.ASIN ?? decodeURIComponent(/items\/([^/]+)\/offers/.exec(r.request?.uri ?? "")?.[1] ?? "");
+    chunk.forEach((asin, j) => {
+      const r = responses.find((x) => asinOf(x) === asin) ?? responses[j];
+      const code = r?.status?.statusCode ?? 0;
+      if (code === 200 && r?.body?.payload) out.push(toItemOffers(asin, r.body.payload, isNew));
+      else {
+        const message = r?.body?.errors?.map((e) => e.message).join(" ") || `status ${code}`;
+        out.push({ asin, offers: [], buyBox: null, error: message });
+      }
+    });
+    onProgress?.(Math.min(i + BATCH_SIZE, asins.length));
+  }
+  return out;
+}
+
 export interface AmazonOrderItem {
   OrderItemId: string;
   SellerSKU?: string;

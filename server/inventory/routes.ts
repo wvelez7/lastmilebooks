@@ -3,6 +3,7 @@ import type { Express, NextFunction, Request, Response } from "express";
 import crypto from "node:crypto";
 import { upsertInventoryItemSchema, upsertSupplySchema } from "@shared/schema";
 import { scanSettingsSchema, toIsbn13 } from "@shared/profit";
+import { repricerSettingsSchema } from "@shared/repricer";
 import { z } from "zod";
 import {
   batchDefaultsSchema,
@@ -21,6 +22,7 @@ import * as whatnot from "./whatnot";
 import * as ebay from "./ebay";
 import * as amazon from "./amazon";
 import * as amazonReturns from "./amazonReturns";
+import * as repricer from "./repricer";
 import * as listings from "./listings";
 import { parseActiveListingsReport, ReportError } from "./ebayReport";
 import { AMAZON_POLL_MS, handleWhatnotOrder, importListings, pushQuantity, runSyncOnce } from "./sync";
@@ -379,6 +381,63 @@ export function registerInventoryRoutes(app: Express) {
       res.status(400).json({ error: (e as Error).message });
     }
   });
+
+  // Amazon repricer (admin page at /#/repricer).
+  app.get("/api/repricer", requireAdmin, (_req, res) => {
+    res.json({
+      configured: amazon.amazonListingConfigured(),
+      settings: repricer.getSettings(),
+      job: repricer.repricerJob(),
+      listings: repricer.listListings(),
+      changes: repricer.listChanges(),
+    });
+  });
+
+  app.put("/api/repricer/settings", requireAdmin, (req, res) => {
+    const parsed = repricerSettingsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    if (parsed.data.defaultMin > parsed.data.defaultMax) {
+      return res.status(400).json({ error: "The default min is above the default max" });
+    }
+    repricer.saveSettings(parsed.data);
+    res.json(parsed.data);
+  });
+
+  // Starts in the background; a run takes about 10 minutes for 1,000 books.
+  app.post("/api/repricer/run", requireAdmin, (_req, res) => {
+    try {
+      res.status(202).json(repricer.startRun());
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  app.put("/api/repricer/listings/:sku/minmax", requireAdmin, (req, res) => {
+    const parsed = z
+      .object({ min: z.number().positive().nullable(), max: z.number().positive().nullable() })
+      .refine((v) => (v.min === null) === (v.max === null), "Enter both a min and a max, or clear both")
+      .refine((v) => v.min === null || v.max === null || v.min <= v.max, "The min is above the max")
+      .safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
+    const listing = repricer.setMinMax(String(req.params.sku), parsed.data.min, parsed.data.max);
+    if (!listing) return res.status(404).json({ error: "not_found" });
+    res.json(listing);
+  });
+
+  app.post(
+    "/api/repricer/minmax",
+    requireAdmin,
+    express.raw({ type: "application/octet-stream", limit: "25mb" }),
+    (req, res) => {
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: "Empty file" });
+      try {
+        res.json(repricer.importMinMaxFile(req.body));
+      } catch (e) {
+        if (e instanceof repricer.MinMaxFileError) return res.status(400).json({ error: e.message });
+        throw e;
+      }
+    },
+  );
 
   // Shipping supplies (admin page at /#/supplies). Any stock change can cross a
   // reorder point, so each route below re-checks and emails in the background.

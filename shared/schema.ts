@@ -255,3 +255,48 @@ export const upsertInventoryItemSchema = z.object({
 export type UpsertInventoryItem = z.infer<typeof upsertInventoryItemSchema>;
 export type InventoryItem = typeof inventoryItems.$inferSelect;
 export type SyncEvent = typeof syncEvents.$inferSelect;
+
+// Amazon repricer (/#/repricer). One row per book you ship yourself, refreshed
+// from Amazon's listings report; rows that leave the report stay, inactive,
+// so a min/max set by hand comes back if the book is relisted.
+export const repricerListings = sqliteTable("repricer_listings", {
+  sku: text("sku").primaryKey(),
+  asin: text("asin").notNull(),
+  title: text("title").notNull(),
+  condition: text("condition"), // "good", "very_good", ...
+  price: real("price").notNull(),
+  quantity: integer("quantity").notNull().default(0),
+  openedAt: text("opened_at"),
+  firstPrice: real("first_price"), // the price when first seen, for new listings
+  minPrice: real("min_price"),
+  maxPrice: real("max_price"),
+  minMaxSource: text("min_max_source"), // "manual" | "file" | null
+  competitorPrice: real("competitor_price"), // landed: price plus shipping
+  competitorLabel: text("competitor_label"),
+  competitors: integer("competitors"),
+  buyBoxPrice: real("buy_box_price"),
+  hasBuyBox: integer("has_buy_box", { mode: "boolean" }).notNull().default(false),
+  myShipping: real("my_shipping"),
+  targetPrice: real("target_price"),
+  status: text("status"),
+  checkedAt: text("checked_at"),
+  changedAt: text("changed_at"),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+});
+
+export type RepricerListingRow = typeof repricerListings.$inferSelect;
+
+// Every price the repricer changed on Amazon, or tried to.
+export const repricerChanges = sqliteTable("repricer_changes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sku: text("sku").notNull(),
+  title: text("title").notNull(),
+  oldPrice: real("old_price").notNull(),
+  newPrice: real("new_price").notNull(),
+  competitorPrice: real("competitor_price"),
+  reason: text("reason").notNull(),
+  error: text("error"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
