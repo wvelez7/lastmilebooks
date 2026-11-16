@@ -26,6 +26,7 @@ import {
   SkuSettingsForm,
 } from "./ScanBatch";
 import type { Api, BatchesResponse } from "./ScanBatch";
+import AdminNav from "@/components/AdminNav";
 
 // Phone page for checking books against the eBay store and Amazon's prices,
 // and listing them in batches (Batch tab), the way Accelerlist does.
@@ -834,6 +835,7 @@ export default function Scan() {
 
   return (
     <main className="mx-auto min-h-screen max-w-md space-y-4 bg-background px-4 py-4 md:max-w-2xl">
+      <AdminNav />
       <h1 className="text-xl font-semibold">Book scanner</h1>
 
       {status && !status.connected && (

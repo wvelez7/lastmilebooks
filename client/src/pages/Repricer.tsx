@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { forgetAdminKey, readAdminKey, saveAdminKey } from "@/lib/adminKey";
 import { CONDITION_LABELS, effectiveMinMax, normalizeCondition } from "@shared/repricer";
 import type { MinMaxSource, RepricerChange, RepricerJob, RepricerListing, RepricerSettings } from "@shared/repricer";
+import AdminNav from "@/components/AdminNav";
 
 // Admin page for the Amazon repricer. Not linked from the site; open
 // /#/repricer and enter the ADMIN_KEY (shared with the other admin pages).
@@ -316,6 +317,7 @@ export default function Repricer() {
   return (
     <main className="min-h-screen bg-muted/30 px-4 py-8">
       <div className="mx-auto max-w-6xl space-y-6">
+        <AdminNav />
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Amazon repricer</h1>

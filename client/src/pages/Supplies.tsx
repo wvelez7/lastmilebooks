@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { forgetAdminKey, readAdminKey, saveAdminKey } from "@/lib/adminKey";
+import AdminNav from "@/components/AdminNav";
 
 // Admin page for shipping supplies. Not linked from the site; open /#/supplies
 // and enter the ADMIN_KEY (shared with the other admin pages, remembered on the device).
@@ -216,6 +217,7 @@ export default function Supplies() {
   return (
     <main className="min-h-screen bg-muted/30 px-4 py-8">
       <div className="mx-auto max-w-4xl space-y-6">
+        <AdminNav />
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Shipping supplies</h1>

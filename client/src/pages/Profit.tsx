@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { forgetAdminKey, readAdminKey, saveAdminKey } from "@/lib/adminKey";
 import { localDay, summarizeProfit } from "@shared/profitReport";
 import type { AccountCharge, ProfitPlatform, ProfitRow, ProfitSettings, ProfitTotals } from "@shared/profitReport";
+import AdminNav from "@/components/AdminNav";
 
 // Admin page for profit across Amazon and eBay. Not linked from the site; open
 // /#/profit and enter the ADMIN_KEY (shared with the other admin pages).
@@ -274,6 +275,7 @@ export default function Profit() {
     <main className="min-h-screen bg-muted/30 px-4 py-8">
       <style>{CHART_STYLE}</style>
       <div className="mx-auto max-w-5xl space-y-6">
+        <AdminNav />
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Profit</h1>
