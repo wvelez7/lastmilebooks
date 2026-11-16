@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 import HERO_PHOTO from "@/assets/photos/hero.jpg";
-import BOOKS_STACK_PHOTO from "@/assets/photos/books-stack.jpg";
+import DONATION_TABLE_PHOTO from "@/assets/photos/donation-table.jpg";
 import READERS_PHOTO from "@/assets/photos/readers.webp";
 import DONATED_BOOKS_PHOTO from "@/assets/photos/donated-books.jpg";
 import OPEN_BOOK_PHOTO from "@/assets/photos/open-book.jpg";
@@ -276,8 +276,8 @@ export default function Home() {
       <section className="border-y border-border/70">
         <div className="relative h-64 w-full overflow-hidden md:h-80">
           <img
-            src={BOOKS_STACK_PHOTO}
-            alt="A curving wall of colorful book spines on warm wooden shelves"
+            src={DONATION_TABLE_PHOTO}
+            alt="Donated books spread across a table: a vintage bird guide, a James Patterson thriller, a poetry collection and more"
             className="h-full w-full object-cover"
             loading="lazy"
           />
