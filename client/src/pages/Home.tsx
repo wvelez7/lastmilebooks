@@ -14,7 +14,7 @@ import {
 
 import HERO_PHOTO from "@/assets/photos/hero.jpg";
 import BOOKS_STACK_PHOTO from "@/assets/photos/books-stack.jpg";
-import BOOKSHELF_PHOTO from "@/assets/photos/bookshelf.jpg";
+import READERS_PHOTO from "@/assets/photos/readers.webp";
 import DONATED_BOOKS_PHOTO from "@/assets/photos/donated-books.jpg";
 import OPEN_BOOK_PHOTO from "@/assets/photos/open-book.jpg";
 
@@ -327,8 +327,8 @@ export default function Home() {
               </h2>
               <div className="mt-8 aspect-[4/3] overflow-hidden rounded-2xl border border-border shadow-sm">
                 <img
-                  src={BOOKSHELF_PHOTO}
-                  alt="A floor-to-ceiling wall of well-organized books"
+                  src={READERS_PHOTO}
+                  alt="Two people reading paperbacks together on a living room couch"
                   className="h-full w-full object-cover"
                   loading="lazy"
                 />
