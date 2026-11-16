@@ -84,9 +84,12 @@ async function accessToken(sa: ServiceAccount): Promise<string> {
 const TIME_ZONE = "America/Los_Angeles";
 const PICKUP_DAY_START = 9 * 60; // minutes after midnight: 9:00 AM
 
-/** How long a pickup takes, in minutes. */
-export function pickupMinutes(r: Pick<PickupRequest, "numberOfBoxes">): number {
-  return /^21\+/.test(r.numberOfBoxes) ? 120 : 60;
+/** How long a pickup takes, in minutes. Boxing the books ourselves takes about twice as long. */
+export function pickupMinutes(
+  r: Pick<PickupRequest, "numberOfBoxes" | "fullService">
+): number {
+  const minutes = /^21\+/.test(r.numberOfBoxes) ? 120 : 60;
+  return r.fullService ? minutes * 2 : minutes;
 }
 
 function clock(minutes: number): string {
@@ -95,9 +98,9 @@ function clock(minutes: number): string {
   return `${h}:${m}:00`;
 }
 
-/** Calendar title: just "Pickup" and the city; customer details stay in the description. */
-export function pickupTitle(r: Pick<PickupRequest, "city">): string {
-  return `Pickup – ${r.city.trim()}`;
+/** Calendar title: "Pickup" (or "Pickup + boxing") and the city; customer details stay in the description. */
+export function pickupTitle(r: Pick<PickupRequest, "city" | "fullService">): string {
+  return `${r.fullService ? "Pickup + boxing" : "Pickup"} – ${r.city.trim()}`;
 }
 
 /**
@@ -106,7 +109,7 @@ export function pickupTitle(r: Pick<PickupRequest, "city">): string {
  */
 export function pickupEvent(
   r: PickupRequest,
-  earlierSameDay: Pick<PickupRequest, "numberOfBoxes">[] = []
+  earlierSameDay: Pick<PickupRequest, "numberOfBoxes" | "fullService">[] = []
 ) {
   const start =
     PICKUP_DAY_START + earlierSameDay.reduce((sum, e) => sum + pickupMinutes(e), 0);
@@ -120,6 +123,7 @@ export function pickupEvent(
       `Email: ${r.email}`,
       `Address: ${r.pickupAddress}, ${r.city}`,
       `Boxes: ${r.numberOfBoxes}`,
+      `Service: ${r.fullService ? "We box the books and carry them out" : "Books set out for pickup"}`,
       `Notes: ${r.notes || "(none)"}`,
       `Photo: ${r.photo ? "yes, attached to the pickup request email" : "(none)"}`,
       ``,
@@ -133,7 +137,7 @@ export function pickupEvent(
 /** Creates the calendar event and returns its id, or null if not configured. */
 export async function addPickupToCalendar(
   r: PickupRequest,
-  earlierSameDay: Pick<PickupRequest, "numberOfBoxes">[] = []
+  earlierSameDay: Pick<PickupRequest, "numberOfBoxes" | "fullService">[] = []
 ): Promise<string | null> {
   const sa = serviceAccount();
   if (!sa) return null;

@@ -117,6 +117,7 @@ function renderOwnerText(r: PickupRequest): string {
     `Address:  ${r.pickupAddress}`,
     `City:     ${r.city}`,
     `Boxes:    ${r.numberOfBoxes}`,
+    `Service:  ${serviceLabel(r)}`,
     `Date:     ${r.preferredDate}`,
     `Notes:    ${r.notes || "(none)"}`,
     `Photo:    ${r.photo ? "attached" : "(none)"}`,
@@ -143,6 +144,7 @@ function renderOwnerHtml(r: PickupRequest): string {
           ${row("Address", r.pickupAddress)}
           ${row("City", r.city)}
           ${row("Boxes", r.numberOfBoxes)}
+          ${row("Service", serviceLabel(r))}
           ${row("Preferred date", r.preferredDate)}
           ${row("Notes", r.notes || "(none)")}
           ${row("Photo", r.photo ? "Attached to this email" : "(none)")}
@@ -165,9 +167,10 @@ function renderCustomerText(r: PickupRequest): string {
     `  Pickup address: ${r.pickupAddress}`,
     `  City:           ${r.city}`,
     `  Estimated boxes: ${r.numberOfBoxes}`,
+    `  Service:        ${serviceLabel(r)}`,
     `  Preferred date: ${r.preferredDate}`,
     ``,
-    `On the day of pickup, please leave your books on the porch or at the top of your driveway. We'll send a confirmation email that day with your pickup window.`,
+    `On the day of pickup: ${pickupDayText(r)}`,
     ``,
     `Questions? Just reply to this email.`,
     ``,
@@ -195,11 +198,12 @@ function renderCustomerHtml(r: PickupRequest): string {
           ${row("Pickup address", r.pickupAddress)}
           ${row("City", r.city)}
           ${row("Estimated boxes", String(r.numberOfBoxes))}
+          ${row("Service", serviceLabel(r))}
           ${row("Preferred date", r.preferredDate)}
         </table>
         <div style="background:#FBF8F0;border-left:3px solid #D8A84A;padding:14px 16px;margin:0 0 18px 0;border-radius:0 6px 6px 0;">
           <div style="font-weight:bold;margin-bottom:6px;">On the day of pickup</div>
-          <div>Please leave your books on the porch or at the top of your driveway. We'll send a confirmation email that day with your pickup window.</div>
+          <div>${escapeHtml(pickupDayText(r))}</div>
         </div>
         <p style="margin:0 0 14px 0;">Questions? Just reply to this email.</p>
         <p style="margin:0;">Thanks,<br/>Last Mile Books</p>
@@ -209,6 +213,18 @@ function renderCustomerHtml(r: PickupRequest): string {
       </div>
     </div>
   </div>`;
+}
+
+function serviceLabel(r: PickupRequest): string {
+  return r.fullService
+    ? "We box the books and carry them out (free)"
+    : "Books set out for pickup";
+}
+
+function pickupDayText(r: PickupRequest): string {
+  return r.fullService
+    ? "We'll bring boxes, pack the books right where they are, and carry them out. Please make sure we can get to the shelves. We'll send a confirmation email that day with your pickup window."
+    : "Please leave your books on the porch or at the top of your driveway. We'll send a confirmation email that day with your pickup window.";
 }
 
 /**

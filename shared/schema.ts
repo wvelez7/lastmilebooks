@@ -14,6 +14,9 @@ export const pickupRequests = sqliteTable("pickup_requests", {
   notes: text("notes"),
   // Optional photo of the donation, as a data URL (resized in the browser).
   photo: text("photo"),
+  // Donor asked us to box the books and carry them out (free), instead of
+  // setting boxes out for us.
+  fullService: integer("full_service", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

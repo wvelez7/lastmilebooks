@@ -98,6 +98,15 @@ export function SiteFooter() {
               </li>
               <li>
                 <a
+                  href="/free-book-removal-menifee-murrieta.html"
+                  className="hover:text-foreground"
+                  data-testid="link-book-removal"
+                >
+                  Free book removal (we box it)
+                </a>
+              </li>
+              <li>
+                <a
                   href="/partners.html"
                   className="hover:text-foreground"
                   data-testid="link-partners"

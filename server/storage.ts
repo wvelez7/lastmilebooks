@@ -148,6 +148,7 @@ addColumn("batch_items", "box", "TEXT NOT NULL DEFAULT ''");
 addColumn("batch_items", "label_printed_at", "TEXT");
 addColumn("pickup_requests", "photo", "TEXT");
 addColumn("pickup_requests", "calendar_event_id", "TEXT");
+addColumn("pickup_requests", "full_service", "INTEGER NOT NULL DEFAULT 0");
 
 export const db = drizzle(sqlite);
 

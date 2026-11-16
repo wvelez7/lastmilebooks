@@ -385,6 +385,10 @@ export default function Home() {
                 a: "One full box. We can't make a special trip for just a few loose books, but a single box of any size is plenty — and there's no maximum.",
               },
               {
+                q: "Do I need to box the books myself?",
+                a: "No. If your books are still on the shelves, choose \"Still on the shelves\" on the form. We'll bring boxes, pack everything where it sits, and carry it out, free.",
+              },
+              {
                 q: "Where do you pick up?",
                 a: "We currently service Murrieta, Menifee, Temecula, Palm Springs, and surrounding areas in Riverside County. If you're slightly outside that radius, contact us — we'll often still come.",
               },

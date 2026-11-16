@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
   SelectContent,
@@ -104,6 +105,9 @@ export function PickupForm() {
       preferredDate: "",
       notes: "",
       photo: null,
+      // Ad landing pages link here with ?service=full to preselect boxing.
+      fullService:
+        new URLSearchParams(window.location.search).get("service") === "full",
     },
   });
   const [photoError, setPhotoError] = useState<string | null>(null);
@@ -255,6 +259,58 @@ export function PickupForm() {
           )}
         />
 
+        <FormField
+          control={form.control}
+          name="fullService"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Where are the books now?</FormLabel>
+              <FormControl>
+                <RadioGroup
+                  value={field.value ? "full" : "set-out"}
+                  onValueChange={(v) => field.onChange(v === "full")}
+                  className="grid gap-3 sm:grid-cols-2"
+                >
+                  {[
+                    {
+                      value: "set-out",
+                      title: "Boxed or bagged",
+                      body: "I'll set them out by the door.",
+                    },
+                    {
+                      value: "full",
+                      title: "Still on the shelves",
+                      body: "Box them up and carry them out for me. Free.",
+                    },
+                  ].map((o) => (
+                    <label
+                      key={o.value}
+                      htmlFor={`service-${o.value}`}
+                      className="flex cursor-pointer items-start gap-3 rounded-md border border-border px-4 py-3 text-sm has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5"
+                    >
+                      <RadioGroupItem
+                        value={o.value}
+                        id={`service-${o.value}`}
+                        className="mt-0.5"
+                        data-testid={`radio-service-${o.value}`}
+                      />
+                      <span>
+                        <span className="block font-medium text-foreground">
+                          {o.title}
+                        </span>
+                        <span className="block text-muted-foreground">
+                          {o.body}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </RadioGroup>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
         <div className="grid gap-5 md:grid-cols-2">
           <FormField
             control={form.control}
@@ -279,6 +335,9 @@ export function PickupForm() {
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  A full bookshelf is about 6–8 boxes. A guess is fine.
+                </p>
                 <FormMessage />
               </FormItem>
             )}
