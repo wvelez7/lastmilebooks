@@ -8,8 +8,18 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { forgetAdminKey, readAdminKey, saveAdminKey } from "@/lib/adminKey";
-import { localDay, summarizeProfit } from "@shared/profitReport";
-import type { AccountCharge, ProfitPlatform, ProfitRow, ProfitSettings, ProfitTotals } from "@shared/profitReport";
+import { localDay, summarizeListed, summarizeProfit } from "@shared/profitReport";
+import type {
+  AccountCharge,
+  ListedFeeRates,
+  ListedInventory,
+  ListedSummary,
+  ListedTotals,
+  ProfitPlatform,
+  ProfitRow,
+  ProfitSettings,
+  ProfitTotals,
+} from "@shared/profitReport";
 import AdminNav from "@/components/AdminNav";
 
 // Admin page for profit across Amazon and eBay. Not linked from the site; open
@@ -31,6 +41,8 @@ interface ProfitData {
   suppliesPerOrder: number | null;
   rows: ProfitRow[];
   charges: AccountCharge[];
+  listed?: ListedInventory; // missing until the server is updated
+  scan: ListedFeeRates;
 }
 
 type PeriodId = "month" | "lastMonth" | "30" | "90" | "year" | "12m";
@@ -140,7 +152,116 @@ function NumberField({
   );
 }
 
-const BREAKDOWN: { key: keyof ProfitTotals; label: string; minus: boolean; hint?: string }[] = [
+function ago(iso: string | null): string {
+  return iso ? formatDistanceToNow(new Date(iso), { addSuffix: true }) : "not yet";
+}
+
+// What everything listed right now would bring in if it all sold at its
+// listed price. Doesn't follow the period buttons: it's a snapshot.
+function ListedSection({
+  listed,
+  summary,
+  platform,
+}: {
+  listed: ListedInventory;
+  summary: ListedSummary;
+  platform: ProfitPlatform | "all";
+}) {
+  const t = summary.total;
+  const platforms: ProfitPlatform[] = platform === "all" ? ["amazon", "ebay"] : [platform];
+  const maxBand = Math.max(1, ...summary.priceBands.map((b) => b.value));
+  const row = (label: string, p: ListedTotals, bold = false) => (
+    <tr key={label} className={bold ? "border-t-2 font-semibold" : "border-t"}>
+      <td className="py-1.5 pr-3">{label}</td>
+      <td className="py-1.5 pr-3 text-right tabular-nums">{p.books.toLocaleString()}</td>
+      <td className="py-1.5 pr-3 text-right tabular-nums whitespace-nowrap">{money(p.value)}</td>
+      <td className="py-1.5 pr-3 text-right tabular-nums whitespace-nowrap text-muted-foreground">{money(-p.fees)}</td>
+      <td className={`py-1.5 text-right tabular-nums whitespace-nowrap ${p.profit < 0 ? "text-destructive" : ""}`}>
+        {money(p.profit)}
+      </td>
+    </tr>
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">Listed inventory</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          What everything listed right now is worth if it all sells at its listed price. Doesn't change with the period
+          buttons. Amazon listings updated {ago(listed.amazonAt)}, eBay {ago(listed.ebayAt)}.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+          <Stat label="Books listed" value={t.books.toLocaleString()} hint={`${t.listings.toLocaleString()} listings`} />
+          <Stat label="Listed value" value={money(t.value)} hint={t.books ? `average ${money(t.value / t.books)}` : undefined} />
+          <Stat
+            label="Profit if it all sells"
+            value={money(t.profit)}
+            tone={t.profit < 0 ? "bad" : t.profit > 0 ? "good" : undefined}
+            hint="after fees and your costs"
+          />
+          <Stat
+            label="Would lose money"
+            value={t.losing.toLocaleString()}
+            tone={t.losing > 0 ? "bad" : undefined}
+            hint="listings priced below your costs"
+          />
+        </div>
+
+        <div className="grid gap-6 md:grid-cols-5">
+          <div className="overflow-x-auto md:col-span-3">
+            <table className="w-full text-sm">
+              <thead className="text-left text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-3 font-normal" />
+                  <th className="py-1 pr-3 font-normal text-right">Books</th>
+                  <th className="py-1 pr-3 font-normal text-right">Value</th>
+                  <th className="py-1 pr-3 font-normal text-right">Fees</th>
+                  <th className="py-1 font-normal text-right">Profit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {platforms.map((p) => row(PLATFORM_LABEL[p], summary.byPlatform[p]))}
+                {platform === "all" && summary.crossListed > 0 && row("Both, each book once", t, true)}
+              </tbody>
+            </table>
+            {platform === "all" && summary.crossListed > 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {summary.crossListed} book{summary.crossListed > 1 ? "s are" : " is"} listed on both (linked on /#/inventory);
+                the total counts each once, on whichever would earn more.
+              </p>
+            )}
+          </div>
+          <div className="md:col-span-2">
+            <div className="mb-2 text-sm text-muted-foreground">Value by listed price</div>
+            <ul className="space-y-2">
+              {summary.priceBands.map((b) => (
+                <li key={b.label} className="text-sm">
+                  <div className="flex justify-between gap-3">
+                    <span>{b.label}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {money(b.value)} · {b.books.toLocaleString()} books
+                    </span>
+                  </div>
+                  <div className="mt-1 h-2 rounded bg-muted">
+                    <div className="h-2 rounded bg-primary" style={{ width: `${(b.value / maxBand) * 100}%` }} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Fees use your rates on /#/scan; postage, supplies and cost per book come from Your costs below. Whatnot
+          listings aren't included.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+const BREAKDOWN:{ key: keyof ProfitTotals; label: string; minus: boolean; hint?: string }[] = [
   { key: "sales", label: "Sales (book + shipping paid)", minus: false },
   { key: "fees", label: "Marketplace fees", minus: true },
   { key: "refunds", label: "Refunds", minus: true },
@@ -226,6 +347,11 @@ export default function Profit() {
     const supplies = data.settings.suppliesPerOrder ?? data.suppliesPerOrder ?? 0;
     return summarizeProfit(data.rows, data.charges, data.settings, supplies, range.from, range.to, platform);
   }, [data, range.from, range.to, platform]);
+  const listedSummary = useMemo(() => {
+    if (!data?.listed) return null;
+    const supplies = data.settings.suppliesPerOrder ?? data.suppliesPerOrder ?? 0;
+    return summarizeListed(data.listed, data.settings, supplies, data.scan, platform);
+  }, [data, platform]);
 
   if (!adminKey) {
     return (
@@ -462,6 +588,10 @@ export default function Profit() {
               </CardContent>
             </Card>
           </div>
+        )}
+
+        {data?.listed && listedSummary && (
+          <ListedSection listed={data.listed} summary={listedSummary} platform={platform} />
         )}
 
         {data && (

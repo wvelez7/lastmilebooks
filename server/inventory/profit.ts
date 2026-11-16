@@ -14,7 +14,9 @@ import * as amazon from "./amazon";
 import * as ebay from "./ebay";
 import { listSupplies } from "./supplies";
 import { getScanSettings } from "./listings";
-import { listListings as repricerListings } from "./repricer";
+import { listListings as repricerListings, listingsRefreshedAt, refreshListings as refreshAmazonListings } from "./repricer";
+import { listAllListings as ebayListings, listingStatus as ebayListingStatus } from "./listings";
+import type { ListedInventory } from "@shared/profitReport";
 import { fetchReportOfType, parseFlatFile, storedSales as amazonSales } from "./amazonReturns";
 import type { ScanSettings } from "@shared/profit";
 
@@ -93,6 +95,40 @@ export function suppliesCostPerOrder(): number | null {
   const turns = used.filter((s) => s.takesTurns);
   const turnAvg = turns.length ? turns.reduce((sum, s) => sum + each(s), 0) / turns.length : 0;
   return Math.round((fixed + turnAvg) * 100) / 100;
+}
+
+// Every book listed for sale right now, for what it's worth if it sells at
+// its price. A book linked to both an Amazon SKU and an eBay listing on
+// /#/inventory is one book listed twice.
+export function listedInventory(): ListedInventory {
+  return {
+    items: [
+      ...repricerListings().map((l) => ({
+        platform: "amazon" as const,
+        id: l.sku,
+        title: l.title,
+        price: l.price,
+        shipping: null,
+        quantity: l.quantity,
+      })),
+      ...ebayListings()
+        .filter((l) => l.quantity > 0)
+        .map((l) => ({
+          platform: "ebay" as const,
+          id: l.itemId,
+          title: l.title,
+          price: l.price,
+          shipping: l.shipping,
+          quantity: l.quantity,
+        })),
+    ],
+    crossListed: inventoryStore
+      .listItems()
+      .filter((i) => i.amazonSku && i.ebayItemId)
+      .map((i) => ({ amazon: i.amazonSku!, ebay: i.ebayItemId! })),
+    amazonAt: listingsRefreshedAt(),
+    ebayAt: ebayListingStatus().refreshedAt,
+  };
 }
 
 // ---- Amazon: financial events --------------------------------------------
@@ -620,6 +656,11 @@ async function refresh(): Promise<void> {
       job.notes.push(`Amazon fees are estimated from your fee rates for now. ${(e as Error).message}`);
     }
     inventoryStore.setState(ROWS_KEY, JSON.stringify(applyAmazonFees(storedRows(), storedFees())));
+    try {
+      await refreshAmazonListings();
+    } catch (e) {
+      job.notes.push(`Couldn't refresh your Amazon listings: ${(e as Error).message}`);
+    }
   } else job.notes.push("Amazon isn't connected on the server.");
 
   if (ebay.ebayConnected()) {

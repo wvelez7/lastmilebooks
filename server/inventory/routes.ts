@@ -395,6 +395,8 @@ export function registerInventoryRoutes(app: Express) {
       suppliesPerOrder: profit.suppliesCostPerOrder(),
       rows: profit.storedRows(),
       charges: profit.storedCharges(),
+      listed: profit.listedInventory(),
+      scan: listings.getScanSettings(),
     });
   });
 

@@ -243,3 +243,150 @@ export function summarizeProfit(
     feesEstimated,
   };
 }
+
+// ---- Listed inventory: what it's worth if it all sells at its price -------
+
+export interface ListedItem {
+  platform: ProfitPlatform;
+  id: string; // Amazon seller SKU or eBay item ID
+  title: string;
+  price: number;
+  shipping: number | null; // eBay: what the buyer pays; null = calculated
+  quantity: number;
+}
+
+export interface ListedInventory {
+  items: ListedItem[];
+  crossListed: { amazon: string; ebay: string }[]; // one book listed on both
+  amazonAt: string | null; // when each list was last refreshed
+  ebayAt: string | null;
+}
+
+export interface ListedTotals {
+  listings: number;
+  books: number;
+  value: number; // price × quantity, what buyers would pay for the books
+  fees: number;
+  profit: number; // after fees, postage, supplies and book cost
+  losing: number; // listings that would lose money at their price
+}
+
+export interface ListedSummary {
+  total: ListedTotals; // a book listed on both counts once, at its better profit
+  byPlatform: Record<ProfitPlatform, ListedTotals>;
+  crossListed: number;
+  priceBands: { label: string; books: number; value: number }[];
+}
+
+export interface ListedFeeRates {
+  feePercent: number;
+  orderFeeSmall: number;
+  orderFeeLarge: number;
+  salesTaxPercent: number;
+  amazonReferralPercent: number;
+  amazonClosingFee: number;
+  amazonShippingCredit: number;
+}
+
+function emptyListed(): ListedTotals {
+  return { listings: 0, books: 0, value: 0, fees: 0, profit: 0, losing: 0 };
+}
+
+// One copy sold at its listed price: fees, and profit after your costs.
+export function listedUnitProfit(
+  item: ListedItem,
+  settings: ProfitSettings,
+  suppliesPerOrder: number,
+  rates: ListedFeeRates,
+): { fees: number; profit: number } {
+  if (item.platform === "amazon") {
+    const shipping = rates.amazonShippingCredit;
+    const fees = (item.price + shipping) * (rates.amazonReferralPercent / 100) + rates.amazonClosingFee;
+    return {
+      fees: roundCents(fees),
+      profit: roundCents(item.price + shipping - fees - settings.amazonPostage - suppliesPerOrder - settings.bookCost),
+    };
+  }
+  // Calculated shipping: the buyer pays about what the postage costs.
+  const shipping = item.shipping ?? settings.ebayPostage;
+  const subtotal = item.price + shipping;
+  const orderTotal = subtotal * (1 + rates.salesTaxPercent / 100); // eBay charges its fee on the tax too
+  const fees = orderTotal * (rates.feePercent / 100) + (orderTotal > 10 ? rates.orderFeeLarge : rates.orderFeeSmall);
+  return {
+    fees: roundCents(fees),
+    profit: roundCents(subtotal - fees - settings.ebayPostage - suppliesPerOrder - settings.bookCost),
+  };
+}
+
+const BANDS: [number, string][] = [
+  [10, "Under $10"],
+  [20, "$10–20"],
+  [40, "$20–40"],
+  [Infinity, "$40 and up"],
+];
+
+export function summarizeListed(
+  listed: ListedInventory,
+  settings: ProfitSettings,
+  suppliesPerOrder: number,
+  rates: ListedFeeRates,
+  platform: ProfitPlatform | "all" = "all",
+): ListedSummary {
+  const byPlatform: Record<ProfitPlatform, ListedTotals> = { amazon: emptyListed(), ebay: emptyListed() };
+  const unit = new Map<string, { item: ListedItem; fees: number; profit: number }>();
+  for (const item of listed.items) {
+    if (platform !== "all" && item.platform !== platform) continue;
+    const u = listedUnitProfit(item, settings, suppliesPerOrder, rates);
+    unit.set(`${item.platform}:${item.id}`, { item, ...u });
+    const t = byPlatform[item.platform];
+    t.listings++;
+    t.books += item.quantity;
+    t.value += item.price * item.quantity;
+    t.fees += u.fees * item.quantity;
+    t.profit += u.profit * item.quantity;
+    if (u.profit < 0) t.losing++;
+  }
+
+  const total = emptyListed();
+  for (const t of Object.values(byPlatform)) {
+    for (const k of Object.keys(total) as (keyof ListedTotals)[]) total[k] += t[k];
+  }
+  // A book listed on both sells once: take out the copy that would earn less.
+  let crossListed = 0;
+  if (platform === "all") {
+    for (const pair of listed.crossListed) {
+      const a = unit.get(`amazon:${pair.amazon}`);
+      const e = unit.get(`ebay:${pair.ebay}`);
+      if (!a || !e) continue;
+      crossListed++;
+      const drop = a.profit >= e.profit ? e : a;
+      const q = Math.min(a.item.quantity, e.item.quantity);
+      total.listings--;
+      total.books -= q;
+      total.value -= drop.item.price * q;
+      total.fees -= drop.fees * q;
+      total.profit -= drop.profit * q;
+      if (drop.profit < 0) total.losing--;
+    }
+  }
+
+  const bands = BANDS.map(([, label]) => ({ label, books: 0, value: 0 }));
+  for (const { item } of Array.from(unit.values())) {
+    const i = BANDS.findIndex(([max]) => item.price < max);
+    bands[i].books += item.quantity;
+    bands[i].value += item.price * item.quantity;
+  }
+
+  const round = (t: ListedTotals) => {
+    t.value = roundCents(t.value);
+    t.fees = roundCents(t.fees);
+    t.profit = roundCents(t.profit);
+    return t;
+  };
+  return {
+    total: round(total),
+    byPlatform: { amazon: round(byPlatform.amazon), ebay: round(byPlatform.ebay) },
+    crossListed,
+    priceBands: bands.map((b) => ({ ...b, value: roundCents(b.value) })),
+  };
+}

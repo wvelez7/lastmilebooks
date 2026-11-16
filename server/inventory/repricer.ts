@@ -178,6 +178,22 @@ function saveListings(found: ReturnType<typeof parseListingsReport>): void {
   });
 }
 
+const LISTINGS_AT_KEY = "amazon_listings_refreshed_at";
+
+// Refreshes the stored listings without repricing anything; the profit page
+// uses it for what your listed books are worth.
+export async function refreshListings(): Promise<number> {
+  const found = parseListingsReport(await fetchReportOfType("GET_MERCHANT_LISTINGS_ALL_DATA"));
+  if (found.length === 0) throw new Error("Amazon's listings report had no books you ship yourself");
+  saveListings(found);
+  inventoryStore.setState(LISTINGS_AT_KEY, new Date().toISOString());
+  return found.length;
+}
+
+export function listingsRefreshedAt(): string | null {
+  return inventoryStore.getState(LISTINGS_AT_KEY) ?? null;
+}
+
 // ---- A run -----------------------------------------------------------------
 
 const job: RepricerJob = {
@@ -220,6 +236,7 @@ async function run(): Promise<void> {
     const found = parseListingsReport(await fetchReportOfType("GET_MERCHANT_LISTINGS_ALL_DATA"));
     if (found.length === 0) throw new Error("Amazon's listings report had no books you ship yourself");
     saveListings(found);
+    inventoryStore.setState(LISTINGS_AT_KEY, new Date().toISOString());
 
     const rows = db.select().from(repricerListings).where(eq(repricerListings.active, true)).all();
     const offers = new Map<string, ItemOffers>();
