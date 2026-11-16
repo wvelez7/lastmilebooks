@@ -15,7 +15,8 @@ import * as ebay from "./ebay";
 import { listSupplies } from "./supplies";
 import { getScanSettings } from "./listings";
 import { listListings as repricerListings } from "./repricer";
-import { storedSales as amazonSales } from "./amazonReturns";
+import { fetchReportOfType, parseFlatFile, storedSales as amazonSales } from "./amazonReturns";
+import type { ScanSettings } from "@shared/profit";
 
 const ROWS_KEY = "profit_rows";
 const CHARGES_KEY = "profit_charges";
@@ -23,6 +24,8 @@ const JOB_KEY = "profit_job";
 const SETTINGS_KEY = "profit_settings";
 const AMAZON_THROUGH_KEY = "profit_amazon_through";
 const EBAY_THROUGH_KEY = "profit_ebay_through";
+const AMAZON_ORDERS_THROUGH_KEY = "profit_amazon_orders_through";
+const FEES_KEY = "profit_amazon_fees";
 
 const FIRST_PULL_DAYS = 365;
 // eBay refunds land on the order later, so recent orders are read again.
@@ -50,6 +53,14 @@ export function storedRows(): ProfitRow[] {
 
 export function storedCharges(): AccountCharge[] {
   return load<AccountCharge>(CHARGES_KEY);
+}
+
+function storedFees(): AmazonFeeMap {
+  try {
+    return JSON.parse(inventoryStore.getState(FEES_KEY) ?? "{}") as AmazonFeeMap;
+  } catch {
+    return {};
+  }
 }
 
 export function getSettings(): ProfitSettings {
@@ -158,49 +169,37 @@ function cents(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+// The real fees on one order line, keyed "<order id>:<sku>".
+export type AmazonFeeMap = Record<string, { fees: number; fba: boolean }>;
+
+// Sales themselves come from the orders report (see parseAmazonOrders): a
+// sale you ship yourself only shows up here once Amazon releases the money,
+// about a week after delivery, so counting sales from this undercounts the
+// current month badly. Shipment events are used for their real fees only.
 // Amazon reports fees as negative amounts; rows keep fees positive.
 export function parseFinancialEvents(
   ev: FinancialEvents,
   titles: Map<string, string>,
   unknownTypes: Set<string>,
-): { rows: ProfitRow[]; charges: AccountCharge[] } {
+): { rows: ProfitRow[]; charges: AccountCharge[]; fees: AmazonFeeMap } {
   const rows: ProfitRow[] = [];
   const charges: AccountCharge[] = [];
+  const feeMap: AmazonFeeMap = {};
 
   for (const s of ev.ShipmentEventList ?? []) {
     const orderId = s.AmazonOrderId ?? "";
-    const date = s.PostedDate ?? "";
     // Fees on the shipment or order as a whole go on its first line.
     let orderLevelFees = -(sumFees(s.ShipmentFeeList) + sumFees(s.OrderFeeList));
-    (s.ShipmentItemList ?? []).forEach((item, i) => {
-      let sales = 0;
-      let shipping = 0;
-      for (const c of item.ItemChargeList ?? []) {
-        if (isTax(c.ChargeType)) continue; // Amazon collects and pays the tax
-        if (/shipping/i.test(c.ChargeType ?? "")) shipping += amt(c.ChargeAmount);
-        else sales += amt(c.ChargeAmount);
-      }
-      for (const p of item.PromotionList ?? []) sales += amt(p.PromotionAmount); // negative
+    for (const item of s.ShipmentItemList ?? []) {
       const fees = -sumFees(item.ItemFeeList) + orderLevelFees;
       orderLevelFees = 0;
-      const sku = item.SellerSKU ?? "";
-      rows.push({
-        key: `amazon:${orderId}:${item.OrderItemId ?? i}:${date}`,
-        platform: "amazon",
-        kind: "sale",
-        orderId,
-        date,
-        sku,
-        title: titles.get(sku) ?? sku,
-        quantity: item.QuantityShipped ?? 1,
-        sales: cents(sales),
-        shipping: cents(shipping),
-        fees: cents(fees),
-        refunds: 0,
-        fba: (item.ItemFeeList ?? []).some((f) => /^FBA/i.test(f.FeeType ?? "")),
-        feesEstimated: false,
-      });
-    });
+      const key = `${orderId}:${item.SellerSKU ?? ""}`;
+      const prev = feeMap[key];
+      feeMap[key] = {
+        fees: cents((prev?.fees ?? 0) + fees),
+        fba: Boolean(prev?.fba) || (item.ItemFeeList ?? []).some((f) => /^FBA/i.test(f.FeeType ?? "")),
+      };
+    }
   }
 
   const refundLists: [string, ShipmentEvent[] | undefined][] = [
@@ -292,7 +291,69 @@ export function parseFinancialEvents(
   for (const [name, list] of Object.entries(ev)) {
     if (!handled.has(name) && Array.isArray(list) && list.length) unknownTypes.add(readable(name.replace(/EventList$/, "")));
   }
-  return { rows, charges };
+  return { rows, charges, fees: feeMap };
+}
+
+// Amazon's orders report (All Orders, by order date): every order line the
+// way Seller Central counts them, including ones not shipped or paid out yet.
+// Fees are worked out from the scanner's fee rates until the real ones post.
+export function parseAmazonOrders(
+  text: string,
+  scan: ScanSettings,
+): { rows: ProfitRow[]; noPrice: number } {
+  const byKey = new Map<string, ProfitRow>();
+  let noPrice = 0;
+  for (const r of parseFlatFile(text)) {
+    const orderId = r.amazonorderid;
+    const date = r.purchasedate;
+    if (!orderId || !date || /cancel/i.test(r.orderstatus ?? "")) continue;
+    const quantity = Number(r.quantity) || 0;
+    if (quantity === 0) continue;
+    const money = (v?: string) => Number(v) || 0;
+    if (!r.itemprice) noPrice++;
+    // Discounts come as negative numbers in some reports and positive in others.
+    const sales = money(r.itemprice) - Math.abs(money(r.itempromotiondiscount));
+    const shipping = money(r.shippingprice) - Math.abs(money(r.shippromotiondiscount));
+    const sku = r.sku ?? "";
+    const key = `amazon-order:${orderId}:${sku}`;
+    const prev = byKey.get(key);
+    const row: ProfitRow = prev ?? {
+      key,
+      platform: "amazon",
+      kind: "sale",
+      orderId,
+      date: new Date(date).toISOString(),
+      sku,
+      title: r.productname || sku,
+      quantity: 0,
+      sales: 0,
+      shipping: 0,
+      fees: 0,
+      refunds: 0,
+      fba: /amazon|afn/i.test(r.fulfillmentchannel ?? ""),
+      feesEstimated: true,
+    };
+    row.quantity += quantity;
+    row.sales = cents(row.sales + sales);
+    row.shipping = cents(row.shipping + shipping);
+    row.fees = estimateAmazonFees(row, scan);
+    byKey.set(key, row);
+  }
+  return { rows: Array.from(byKey.values()), noPrice };
+}
+
+function estimateAmazonFees(row: ProfitRow, scan: ScanSettings): number {
+  if (row.sales <= 0) return 0;
+  return cents((row.sales + row.shipping) * (scan.amazonReferralPercent / 100) + scan.amazonClosingFee * row.quantity);
+}
+
+// Puts the real fees on every Amazon order line Amazon has posted them for.
+export function applyAmazonFees(rows: ProfitRow[], feeMap: AmazonFeeMap): ProfitRow[] {
+  return rows.map((r) => {
+    if (r.platform !== "amazon" || r.kind !== "sale") return r;
+    const real = feeMap[`${r.orderId}:${r.sku}`];
+    return real ? { ...r, fees: real.fees, fba: r.fba || real.fba, feesEstimated: false } : r;
+  });
 }
 
 // "FBAInboundTransportationFee" → "FBA inbound transportation fee"
@@ -335,7 +396,34 @@ function amazonTitles(): Map<string, string> {
   return titles;
 }
 
-async function pullAmazon(notes: string[]): Promise<{ rows: ProfitRow[]; charges: AccountCharge[] }> {
+// Order statuses and prices settle over the first weeks (pending orders,
+// cancellations), so the last 30 days are read again each time.
+const ORDERS_REREAD_DAYS = 30;
+
+async function pullAmazonOrders(notes: string[]): Promise<{ rows: ProfitRow[]; from: string }> {
+  const through = inventoryStore.getState(AMAZON_ORDERS_THROUGH_KEY);
+  const end = new Date();
+  const from = new Date(Date.now() - (through ? ORDERS_REREAD_DAYS : FIRST_PULL_DAYS) * 86_400_000);
+  const scan = getScanSettings();
+  const rows: ProfitRow[] = [];
+  let noPrice = 0;
+  // The report covers at most 30 days at a time.
+  for (let start = from; start < end; ) {
+    const windowEnd = new Date(Math.min(end.getTime(), start.getTime() + 30 * 86_400_000));
+    const parsed = parseAmazonOrders(
+      await fetchReportOfType("GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL", { start, end: windowEnd }),
+      scan,
+    );
+    rows.push(...parsed.rows);
+    noPrice += parsed.noPrice;
+    start = windowEnd;
+  }
+  inventoryStore.setState(AMAZON_ORDERS_THROUGH_KEY, end.toISOString());
+  if (noPrice) notes.push(`${noPrice} Amazon order${noPrice > 1 ? "s are" : " is"} still pending, so Amazon hasn't shown the price yet; counted as sold at $0 for now.`);
+  return { rows, from: from.toISOString() };
+}
+
+async function pullAmazon(notes: string[]): Promise<{ rows: ProfitRow[]; charges: AccountCharge[]; fees: AmazonFeeMap }> {
   const through = inventoryStore.getState(AMAZON_THROUGH_KEY);
   // Amazon wants the end at least two minutes in the past.
   const end = new Date(Date.now() - 5 * 60_000);
@@ -346,6 +434,7 @@ async function pullAmazon(notes: string[]): Promise<{ rows: ProfitRow[]; charges
   const unknown = new Set<string>();
   const rows: ProfitRow[] = [];
   const charges: AccountCharge[] = [];
+  const fees: AmazonFeeMap = {};
   // Windows of 30 days keep each one's dateless service fees near their real date.
   while (start < end) {
     const windowEnd = new Date(Math.min(end.getTime(), start.getTime() + 30 * 86_400_000));
@@ -360,6 +449,9 @@ async function pullAmazon(notes: string[]): Promise<{ rows: ProfitRow[]; charges
       const page = await financialEventsPage(qs);
       const parsed = parseFinancialEvents(page.events, titles, unknown);
       rows.push(...parsed.rows);
+      for (const [k, v] of Object.entries(parsed.fees)) {
+        fees[k] = fees[k] ? { fees: cents(fees[k].fees + v.fees), fba: fees[k].fba || v.fba } : v;
+      }
       for (const c of parsed.charges) {
         if (!c.date) {
           c.date = windowEnd.toISOString();
@@ -374,7 +466,7 @@ async function pullAmazon(notes: string[]): Promise<{ rows: ProfitRow[]; charges
   }
   inventoryStore.setState(AMAZON_THROUGH_KEY, end.toISOString());
   if (unknown.size) notes.push(`Amazon also reported ${Array.from(unknown).join(", ")}; those aren't counted.`);
-  return { rows, charges };
+  return { rows, charges, fees };
 }
 
 // ---- eBay: orders ---------------------------------------------------------
@@ -509,12 +601,25 @@ async function refresh(): Promise<void> {
   const errors: string[] = [];
   if (amazon.amazonConfigured()) {
     try {
-      const { rows, charges } = await pullAmazon(job.notes);
+      const { rows, from } = await pullAmazonOrders(job.notes);
+      // The re-read range replaces what was stored for it, so cancelled
+      // orders drop out. "amazon:" rows are sales counted from payments
+      // before 2026-11-17; the orders report replaces them all.
+      const stale = (r: ProfitRow) =>
+        r.platform === "amazon" && r.kind === "sale" && (r.key.startsWith("amazon:") || r.date >= from);
+      inventoryStore.setState(ROWS_KEY, JSON.stringify(merge(storedRows(), rows, stale)));
+    } catch (e) {
+      errors.push(`Amazon orders: ${(e as Error).message}`);
+    }
+    try {
+      const { rows, charges, fees } = await pullAmazon(job.notes);
+      inventoryStore.setState(FEES_KEY, JSON.stringify({ ...storedFees(), ...fees }));
       inventoryStore.setState(ROWS_KEY, JSON.stringify(merge(storedRows(), rows)));
       inventoryStore.setState(CHARGES_KEY, JSON.stringify(merge(storedCharges(), charges)));
     } catch (e) {
-      errors.push((e as Error).message);
+      job.notes.push(`Amazon fees are estimated from your fee rates for now. ${(e as Error).message}`);
     }
+    inventoryStore.setState(ROWS_KEY, JSON.stringify(applyAmazonFees(storedRows(), storedFees())));
   } else job.notes.push("Amazon isn't connected on the server.");
 
   if (ebay.ebayConnected()) {

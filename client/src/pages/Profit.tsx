@@ -454,8 +454,9 @@ export default function Profit() {
                 </table>
                 {summary.feesEstimated > 0 && (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    eBay didn't report the fee on {summary.feesEstimated} order{summary.feesEstimated > 1 ? "s" : ""}; worked
-                    out from your fee rate on /#/scan.
+                    Fees on {summary.feesEstimated} order line{summary.feesEstimated > 1 ? "s" : ""} are worked out from
+                    your fee rates on /#/scan until the marketplace posts the real ones (Amazon: about a week after
+                    delivery).
                   </p>
                 )}
               </CardContent>
