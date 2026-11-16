@@ -39,6 +39,12 @@ const BOX_OPTIONS = [
 
 const CITY_SUGGESTIONS = ["Temecula", "Murrieta", "Menifee", "Palm Springs"];
 
+declare global {
+  interface Window {
+    lmbTrackLead?: () => void;
+  }
+}
+
 const PHOTO_MAX_SIDE = 1600;
 
 // Shrink a phone photo to a JPEG data URL small enough to upload and email.
@@ -119,6 +125,7 @@ export function PickupForm() {
     onSuccess: () => {
       setSubmitted(true);
       form.reset();
+      window.lmbTrackLead?.(); // ad conversion, see public/tracking.js
     },
   });
 
