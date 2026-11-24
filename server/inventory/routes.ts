@@ -27,7 +27,8 @@ import * as profit from "./profit";
 import { profitSettingsSchema } from "@shared/profitReport";
 import * as listings from "./listings";
 import { parseActiveListingsReport, ReportError } from "./ebayReport";
-import { AMAZON_POLL_MS, handleWhatnotOrder, importListings, pushQuantity, runSyncOnce } from "./sync";
+import * as dashboard from "./dashboard";
+import { handleWhatnotOrder, importListings, pushQuantity, runSyncOnce } from "./sync";
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   const expected = process.env.ADMIN_KEY;
@@ -415,6 +416,11 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
+  // Main admin dashboard (/#/admin): a summary of every admin page.
+  app.get("/api/dashboard", requireAdmin, async (_req, res) => {
+    res.json(await dashboard.dashboardSummary());
+  });
+
   // Amazon repricer (admin page at /#/repricer).
   app.get("/api/repricer", requireAdmin, (_req, res) => {
     res.json({
@@ -475,34 +481,10 @@ export function registerInventoryRoutes(app: Express) {
   // Shipping supplies (admin page at /#/supplies). Any stock change can cross a
   // reorder point, so each route below re-checks and emails in the background.
   app.get("/api/supplies", requireAdmin, (_req, res) => {
-    const checked = (key: string) => inventoryStore.getState(key) ?? null;
-    const halfHour = 30 * 60 * 1000;
     res.json({
       // Where orders are counted from, when each was last read, and how long
       // without a check means something is wrong.
-      sources: [
-        {
-          name: "eBay",
-          on: ebay.ebayConnected(),
-          checkedAt: checked("ebay_orders_since"),
-          error: null,
-          staleAfterMs: halfHour,
-        },
-        {
-          name: "Whatnot",
-          on: whatnot.whatnotConfigured(),
-          checkedAt: checked("whatnot_orders_since"),
-          error: null,
-          staleAfterMs: halfHour,
-        },
-        {
-          name: "Amazon",
-          on: amazon.amazonConfigured(),
-          checkedAt: checked("amazon_orders_since"),
-          error: checked("amazon_last_error") || null,
-          staleAfterMs: AMAZON_POLL_MS + 2 * 60 * 60 * 1000,
-        },
-      ],
+      sources: dashboard.orderSources(),
       supplies: supplies.listSupplies(),
       history: supplies.listSupplyHistory(),
     });

@@ -1,9 +1,10 @@
 import { Link, useLocation } from "wouter";
-import { BadgeDollarSign, Boxes, Package, RefreshCcw, ScanBarcode, Tags } from "lucide-react";
+import { BadgeDollarSign, Boxes, LayoutDashboard, Package, RefreshCcw, ScanBarcode, Tags } from "lucide-react";
 
 // Menu linking the admin pages to each other, shown at the top of each one.
 // The admin key is shared, so moving between them doesn't ask for it again.
 const PAGES = [
+  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/scan", label: "Scanner", icon: ScanBarcode },
   { href: "/inventory", label: "Inventory", icon: Boxes },
   { href: "/profit", label: "Profit", icon: BadgeDollarSign },

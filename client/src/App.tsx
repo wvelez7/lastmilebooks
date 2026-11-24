@@ -12,11 +12,13 @@ import Supplies from "@/pages/Supplies";
 import Returns from "@/pages/Returns";
 import Repricer from "@/pages/Repricer";
 import Profit from "@/pages/Profit";
+import Dashboard from "@/pages/Dashboard";
 
 function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Home} />
+      <Route path="/admin" component={Dashboard} />
       <Route path="/inventory" component={Inventory} />
       <Route path="/scan" component={Scan} />
       <Route path="/supplies" component={Supplies} />
