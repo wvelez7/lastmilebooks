@@ -170,7 +170,7 @@ function ListedSection({
 }) {
   const t = summary.total;
   const platforms: ProfitPlatform[] = platform === "all" ? ["amazon", "ebay"] : [platform];
-  const maxBand = Math.max(1, ...summary.priceBands.map((b) => b.value));
+  const maxBand = Math.max(1, ...summary.priceBands.map((b) => Math.abs(b.profit)));
   const row = (label: string, p: ListedTotals, bold = false) => (
     <tr key={label} className={bold ? "border-t-2 font-semibold" : "border-t"}>
       <td className="py-1.5 pr-3">{label}</td>
@@ -242,18 +242,22 @@ function ListedSection({
             )}
           </div>
           <div className="md:col-span-2">
-            <div className="mb-2 text-sm text-muted-foreground">Value by listed price</div>
+            <div className="mb-2 text-sm text-muted-foreground">Profit if sold, by listed price</div>
             <ul className="space-y-2">
               {summary.priceBands.map((b) => (
                 <li key={b.label} className="text-sm">
                   <div className="flex justify-between gap-3">
                     <span>{b.label}</span>
                     <span className="tabular-nums text-muted-foreground">
-                      {money(b.value)} · {b.books.toLocaleString()} books
+                      <span className={b.profit < 0 ? "text-destructive" : undefined}>{money(b.profit)}</span> ·{" "}
+                      {b.books.toLocaleString()} {b.books === 1 ? "book" : "books"}
                     </span>
                   </div>
                   <div className="mt-1 h-2 rounded bg-muted">
-                    <div className="h-2 rounded bg-primary" style={{ width: `${(b.value / maxBand) * 100}%` }} />
+                    <div
+                      className={`h-2 rounded ${b.profit < 0 ? "bg-destructive" : "bg-primary"}`}
+                      style={{ width: `${(Math.abs(b.profit) / maxBand) * 100}%` }}
+                    />
                   </div>
                 </li>
               ))}
