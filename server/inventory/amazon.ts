@@ -149,6 +149,7 @@ interface Offer {
   ListingPrice?: Money;
   Shipping?: Money;
   IsFulfilledByAmazon?: boolean;
+  SellerId?: string;
 }
 
 interface OffersPayload {
@@ -168,6 +169,7 @@ export function listOffers(offers: Offer[]): AmazonOffer[] {
             shipping: o.Shipping?.Amount ?? 0,
             condition: (o.SubCondition ?? "used").toLowerCase(),
             fba: Boolean(o.IsFulfilledByAmazon),
+            ...(o.SellerId && o.SellerId === process.env.AMAZON_SELLER_ID ? { mine: true } : {}),
           }]
         : [],
     )

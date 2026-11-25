@@ -23,6 +23,7 @@ import * as ebay from "./ebay";
 import * as amazon from "./amazon";
 import * as amazonReturns from "./amazonReturns";
 import * as repricer from "./repricer";
+import * as ebayPriceCheck from "./ebayPriceCheck";
 import * as profit from "./profit";
 import { profitSettingsSchema } from "@shared/profitReport";
 import * as listings from "./listings";
@@ -419,6 +420,28 @@ export function registerInventoryRoutes(app: Express) {
   // Main admin dashboard (/#/admin): a summary of every admin page.
   app.get("/api/dashboard", requireAdmin, async (_req, res) => {
     res.json(await dashboard.dashboardSummary());
+  });
+
+  // eBay price check: compare the priciest listings with other eBay and used
+  // Amazon offers. Checking never changes a price; /prices does.
+  app.get("/api/ebay/price-check", requireAdmin, (_req, res) => {
+    res.json(ebayPriceCheck.priceCheckJob());
+  });
+
+  app.post("/api/ebay/price-check", requireAdmin, (req, res) => {
+    if (!ebay.ebayConnected()) return res.status(400).json({ error: "eBay is not connected" });
+    const limit = z.coerce.number().int().min(1).max(500).catch(50).parse(req.body?.limit);
+    res.status(202).json(ebayPriceCheck.startCheck(limit));
+  });
+
+  app.post("/api/ebay/prices", requireAdmin, async (req, res) => {
+    const parsed = z
+      .array(z.object({ itemId: z.string().regex(/^\d+$/), price: z.number().min(0.99).max(10000) }))
+      .min(1)
+      .max(500)
+      .safeParse(req.body?.changes);
+    if (!parsed.success) return res.status(400).json({ error: "changes must be [{ itemId, price }]" });
+    res.json({ results: await ebayPriceCheck.applyPrices(parsed.data) });
   });
 
   // Amazon repricer (admin page at /#/repricer).

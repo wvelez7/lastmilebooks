@@ -183,6 +183,16 @@ export interface EbayActiveListing {
   url: string | null;
 }
 
+// Changes a fixed-price listing's Buy It Now price.
+export async function setListingPrice(itemId: string, price: number): Promise<void> {
+  if (!/^d+$/.test(itemId)) throw new Error(`Invalid eBay item ID "${itemId}"`);
+  if (!(price >= 0.99)) throw new Error(`Invalid price ${price}`);
+  await trading(
+    "ReviseInventoryStatus",
+    `<InventoryStatus><ItemID>${itemId}</ItemID><StartPrice>${price.toFixed(2)}</StartPrice></InventoryStatus>`,
+  );
+}
+
 // Every active listing, with or without a Custom label.
 export async function listActiveListings(): Promise<EbayActiveListing[]> {
   const out: EbayActiveListing[] = [];
@@ -356,10 +366,14 @@ export interface EbayMarketOffer {
   condition: string | null;
   url: string | null;
   imageUrl: string | null;
+  itemId: string | null; // legacy (Trading API) item ID
+  seller: string | null;
 }
 
 interface BrowseItem {
   title: string;
+  legacyItemId?: string;
+  seller?: { username?: string };
   price?: { value: string };
   shippingOptions?: { shippingCost?: { value: string } }[];
   condition?: string;
@@ -394,6 +408,8 @@ export async function searchMarket(gtin: string, limit = 3): Promise<EbayMarketO
       condition: i.condition ?? null,
       url: i.itemWebUrl ?? null,
       imageUrl: i.image?.imageUrl ?? null,
+      itemId: i.legacyItemId ?? null,
+      seller: i.seller?.username ?? null,
     };
   });
   return offers

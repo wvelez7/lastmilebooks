@@ -31,6 +31,7 @@ export interface AmazonPrice {
 export interface AmazonOffer extends AmazonPrice {
   condition: string; // e.g. "very_good"
   fba: boolean;
+  mine?: boolean; // our own Amazon listing
 }
 
 export interface AmazonBook {
