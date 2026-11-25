@@ -185,7 +185,7 @@ export interface EbayActiveListing {
 
 // Changes a fixed-price listing's Buy It Now price.
 export async function setListingPrice(itemId: string, price: number): Promise<void> {
-  if (!/^d+$/.test(itemId)) throw new Error(`Invalid eBay item ID "${itemId}"`);
+  if (!/^\d+$/.test(itemId)) throw new Error(`Invalid eBay item ID "${itemId}"`);
   if (!(price >= 0.99)) throw new Error(`Invalid price ${price}`);
   await trading(
     "ReviseInventoryStatus",
