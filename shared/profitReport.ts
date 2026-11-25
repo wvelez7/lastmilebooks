@@ -279,7 +279,7 @@ export interface ListedSummary {
   byPlatform: Record<ProfitPlatform, ListedTotals>;
   crossListed: number; // eBay listings left out because the book is on Amazon
   ebayOnly: ListedItem[]; // eBay listings whose book isn't on Amazon, by title
-  priceBands: { label: string; books: number; value: number }[];
+  priceBands: { label: string; books: number; value: number; profit: number }[];
 }
 
 export interface ListedFeeRates {
@@ -344,7 +344,7 @@ export function summarizeListed(
   const ebayAlsoOnAmazon = new Set(
     platform === "all" ? listed.crossListed.filter((p) => amazonIds.has(p.amazon)).map((p) => p.ebay) : [],
   );
-  const unit: ListedItem[] = [];
+  const unit: { item: ListedItem; profit: number }[] = [];
   let crossListed = 0;
   for (const item of listed.items) {
     if (platform !== "all" && item.platform !== platform) continue;
@@ -353,7 +353,7 @@ export function summarizeListed(
       continue;
     }
     const u = listedUnitProfit(item, settings, suppliesPerOrder, rates);
-    unit.push(item);
+    unit.push({ item, profit: u.profit });
     const t = byPlatform[item.platform];
     t.listings++;
     t.books += item.quantity;
@@ -368,11 +368,12 @@ export function summarizeListed(
     for (const k of Object.keys(total) as (keyof ListedTotals)[]) total[k] += t[k];
   }
 
-  const bands = BANDS.map(([, label]) => ({ label, books: 0, value: 0 }));
-  for (const item of unit) {
+  const bands = BANDS.map(([, label]) => ({ label, books: 0, value: 0, profit: 0 }));
+  for (const { item, profit } of unit) {
     const i = BANDS.findIndex(([max]) => item.price < max);
     bands[i].books += item.quantity;
     bands[i].value += item.price * item.quantity;
+    bands[i].profit += profit * item.quantity;
   }
 
   const round = (t: ListedTotals) => {
@@ -388,7 +389,7 @@ export function summarizeListed(
     ebayOnly: listed.items
       .filter((i) => i.platform === "ebay" && !allEbayOnAmazon.has(i.id))
       .sort((a, b) => a.title.localeCompare(b.title)),
-    priceBands: bands.map((b) => ({ ...b, value: roundCents(b.value) })),
+    priceBands: bands.map((b) => ({ ...b, value: roundCents(b.value), profit: roundCents(b.profit) })),
   };
 }
 
