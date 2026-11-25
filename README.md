@@ -63,6 +63,12 @@ A `render.yaml` is included for one-click "Blueprint" deploys.
 - `POST /api/pickup-requests` — public, accepts a JSON pickup request, validates with Zod, persists to SQLite, and sends an email.
 - `GET /api/pickup-requests` — admin endpoint listing all requests (no auth — protect or remove before exposing publicly).
 
+## Admin dashboard
+
+Start at `/#/admin` (enter `ADMIN_KEY`). It shows this month's sales, inventory and sync status, supplies to
+reorder, the repricer, Amazon returns and upcoming pickups, plus a "needs attention" list, each linking to its
+page. One endpoint, `GET /api/dashboard`, reads what the app already stored; it calls no marketplace.
+
 ## Inventory sync (Whatnot + eBay)
 
 When a book sells on one marketplace, its quantity drops here and the new

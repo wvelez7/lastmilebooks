@@ -8,8 +8,8 @@
 
   window.lmbTrackLead = function () {};
 
-  // Admin pages (/#/inventory, /#/scan, ...) are never tracked.
-  if (/^#\/(inventory|scan|supplies|returns)/.test(location.hash)) return;
+  // Admin pages (/#/admin, /#/inventory, /#/scan, ...) are never tracked.
+  if (/^#\/(admin|inventory|scan|supplies|returns|repricer|profit)/.test(location.hash)) return;
 
   if (GOOGLE_ADS_ID) {
     var gt = document.createElement("script");
