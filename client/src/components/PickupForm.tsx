@@ -71,7 +71,7 @@ function resizePhoto(file: File): Promise<string> {
   });
 }
 
-const WEEKS_AHEAD = 8;
+const WEEKS_AHEAD = 3;
 
 // Upcoming Tuesdays and Wednesdays, starting tomorrow.
 function upcomingPickupDates() {
